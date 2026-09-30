@@ -188,6 +188,8 @@ final class AppState: ObservableObject {
     @Published var calcomBookings: [CalcomBooking] = []
     @Published var calcomLoaded: Bool = false
     @Published var calcomError: String? = nil
+    @Published var githubError: String? = nil      // last GitHub API error (nil = ok)
+    @Published var githubActivity: GitHubActivity? = nil  // PRs, reviews, notifications (memory only)
 
     // Notion (populated by NotionPoller)
     @Published var notionPages: [NotionPage] = []
@@ -391,6 +393,44 @@ struct ResendEmail: Identifiable {
 struct GitHubStats {
     let totalRepos: Int
     let totalStars: Int
+}
+
+/// CI state of a pull request's head commit (check runs + commit statuses).
+enum GitHubCI: Equatable { case success, failure, pending, none }
+
+struct GitHubPR: Identifiable, Equatable {
+    let id: Int
+    let number: Int
+    let title: String
+    let repo: String          // "owner/name"
+    let url: URL
+    let updatedAt: Date
+    let isDraft: Bool
+    var ci: GitHubCI = .none
+    var approved: Bool = false
+}
+
+struct GitHubNotification: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let repo: String
+    let reason: String        // mention, review_requested, comment, ci_activity…
+    let type: String          // PullRequest, Issue, Release…
+    let url: URL
+    let updatedAt: Date
+}
+
+struct GitHubActivity: Equatable {
+    var login: String = ""
+    var reviewRequests: [GitHubPR] = []
+    var myPRs: [GitHubPR] = []
+    var notifications: [GitHubNotification] = []
+    var notificationsAvailable = true   // false when the token lacks the notifications scope
+
+    /// Most relevant of the user's PRs for the one-line summary: failing, then running, then the rest.
+    var headlinePR: GitHubPR? {
+        myPRs.first { $0.ci == .failure } ?? myPRs.first { $0.ci == .pending } ?? myPRs.first
+    }
 }
 
 // MARK: - Stripe

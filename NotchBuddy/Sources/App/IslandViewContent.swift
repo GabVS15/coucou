@@ -26,6 +26,7 @@ struct IslandViewContent: View {
         case .settings:  SettingsIslandView(state: state)
         case .greeting:  EmptyView()  // GreetingCanvasView overlaid in IslandRootView
         case .liveSession: LiveSessionView(state: state)
+        case .github:      GitHubDetailView(state: state)
         }
     }
 }
@@ -106,7 +107,7 @@ struct OverviewView: View {
             }
             .frame(width: 322)
             .contentShape(RoundedRectangle(cornerRadius: 20))
-            .onTapGesture { openLiveSession() }
+            .onTapGesture { openDetail() }
 
             // Right card: agent pills
             CardBackground(wash: nil) {
@@ -116,11 +117,21 @@ struct OverviewView: View {
         .onChange(of: state.focusId) { _, _ in showingN8nDetail = false }
     }
 
-    /// Click on the Claude Code card → live session view (when enabled and a session is running).
-    private func openLiveSession() {
-        guard state.liveSessionEnabled, let agent, agent.id == "integration_claude",
-              agent.state != .idle || !agent.steps.isEmpty else { return }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { state.view = .liveSession }
+    /// Click on a card with a full-width detail view: Claude Code live session, GitHub activity.
+    private func openDetail() {
+        guard let agent else { return }
+        let target: IslandView
+        switch agent.id {
+        case "integration_claude":
+            guard state.liveSessionEnabled, agent.state != .idle || !agent.steps.isEmpty else { return }
+            target = .liveSession
+        case "integration_github":
+            guard state.githubActivity != nil else { return }
+            target = .github
+        default:
+            return
+        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { state.view = target }
     }
 
     private func openAgentTarget(_ task: AgentTask?) {
@@ -1026,7 +1037,7 @@ struct IntegrationCardView: View {
 
     // GitHub with stats loaded
     private var githubHasData: Bool {
-        task.id == "integration_github" && appState.githubStats != nil
+        task.id == "integration_github" && appState.githubActivity != nil
     }
 
     // Stripe: show card as soon as first poll completes (balance OR payments)
@@ -1064,7 +1075,7 @@ struct IntegrationCardView: View {
             ResendCardView(emails: appState.resendEmails, total: appState.resendTotal)
                 .transition(.opacity)
         } else if githubHasData {
-            GitHubStatsCardView(stats: appState.githubStats!)
+            GitHubActivityCardView(activity: appState.githubActivity!)
                 .transition(.opacity)
         } else if stripeHasData {
             StripeCardView()
@@ -1133,6 +1144,7 @@ struct IntegrationCardView: View {
                 HStack(spacing: 5) {
                     let stripeErr = task.id == "integration_stripe" ? appState.stripeError
                                   : task.id == "integration_calcom"  ? appState.calcomError
+                                  : task.id == "integration_github"  ? appState.githubError
                                   : nil
                     let dot = stripeErr != nil ? Color(hex: "#F4505E")
                             : isConfigured    ? Color(hex: "#22C55E")
@@ -1188,6 +1200,12 @@ struct IntegrationCardView: View {
                                 .foregroundColor(Color(hex: "#0570DE").opacity(0.85))
                                 .buttonStyle(.plain)
                         }
+                    }
+                    if task.id == "integration_github" && isConfigured {
+                        Button("Refresh") { GithubPoller.shared.pollNow() }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "#F4505E").opacity(0.85))
+                            .buttonStyle(.plain)
                     }
                     if task.id == "integration_calcom" && isConfigured {
                         Button("Refresh") { Task { @MainActor in CalcomPoller.shared.pollNow() } }
@@ -1495,48 +1513,6 @@ struct ResendCardView: View {
 }
 
 // MARK: - GitHub Stats Card View
-
-struct GitHubStatsCardView: View {
-    let stats: GitHubStats
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(Color(hex: "#F4505E"))
-                    .frame(width: 7, height: 7)
-                Text("GitHub")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color(hex: "#F5F6F8"))
-                Text("Overview")
-                    .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "#8E939C"))
-            }
-            .padding(.top, 6)
-            .padding(.leading, 108)
-            .padding(.trailing, 36)
-
-            // Stats rows
-            VStack(alignment: .leading, spacing: 5) {
-                StatRow(icon: "star.fill", color: "#F5A524",
-                        label: "Total stars", value: formatCount(stats.totalStars))
-                StatRow(icon: "square.stack.fill", color: "#6B7079",
-                        label: "Repositories", value: "\(stats.totalRepos)")
-            }
-            .padding(.top, 8)
-            .padding(.leading, 108)
-            .padding(.trailing, 12)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.top, 4)
-    }
-
-    private func formatCount(_ n: Int) -> String {
-        if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000) }
-        return "\(n)"
-    }
-}
 
 private struct StatRow: View {
     let icon: String

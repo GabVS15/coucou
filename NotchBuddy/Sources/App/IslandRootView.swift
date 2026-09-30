@@ -442,7 +442,7 @@ struct IslandContentView: View {
                     // Views that fill available height instead of the fixed 98pt content frame:
                     // chat (prompt) is always flexible; mail is flexible only when active so
                     // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || ((v == .mail || v == .liveSession) && active)
+                    let isTall = v == .prompt || ((v == .mail || v == .liveSession || v == .github) && active)
                     let anim: Animation = active
                         ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
                         : .easeIn(duration: 0.16)
@@ -522,7 +522,7 @@ struct TabButton: View {
     @State private var isHovered = false
 
     private var isOn: Bool {
-        if view == .overview { return state.view == .overview || state.view == .empty || state.view == .liveSession }
+        if view == .overview { return state.view == .overview || state.view == .empty || state.view == .liveSession || state.view == .github }
         return state.view == view
     }
 

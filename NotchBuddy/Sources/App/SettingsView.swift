@@ -503,6 +503,7 @@ struct SettingsView: View {
         saveKey("stripe-api-key",  value: stripeKey)
         saveKey("calcom-api-key",  value: calcomKey)
         saveKey("notion-api-key",  value: notionKey)
+        GithubPoller.shared.pollNow()   // show stats right away instead of at the next 5-min poll
         statusMessage = "✓ Integration keys saved."
     }
 

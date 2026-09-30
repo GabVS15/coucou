@@ -6,6 +6,7 @@ enum ClaudeSource: Equatable {
     case vscode
     case desktop
     case terminal(name: String, bundleId: String?)
+    case coucou(sessionId: String)   // launched from Coucou's chat tab (`claude -p`)
 
     static let desktopBundleId = "com.anthropic.claudefordesktop"
 
@@ -34,6 +35,7 @@ enum ClaudeSource: Equatable {
         case .vscode:                return "VS Code"
         case .desktop:               return "Claude"
         case .terminal(let name, _): return name
+        case .coucou:                return "Terminal"
         }
     }
 
@@ -42,17 +44,22 @@ enum ClaudeSource: Equatable {
         case .vscode:                return "VS Code"
         case .desktop:               return "Desktop"
         case .terminal(let name, _): return name
+        case .coucou:                return "Coucou"
         }
     }
 
     /// Detects the source from the fields nb-hook adds (entrypoint, term_program, bundle_id).
-    /// Returns nil for headless runs (`claude -p`, SDK scripts) that no app window belongs to.
+    /// Returns nil for headless runs (`claude -p`, SDK scripts) that no app window belongs to,
+    /// except the ones Coucou launched itself.
     static func detect(_ payload: [String: Any]) -> ClaudeSource? {
         let entrypoint  = (payload["entrypoint"]   as? String ?? "").lowercased()
         let termProgram = (payload["term_program"] as? String ?? "")
         let bundleId    = (payload["bundle_id"]    as? String ?? "")
         let bundleLower = bundleId.lowercased()
 
+        if !(payload["coucou_task"] as? String ?? "").isEmpty {
+            return .coucou(sessionId: payload["session_id"] as? String ?? "")
+        }
         if entrypoint.contains("desktop") || bundleLower == desktopBundleId { return .desktop }
         if entrypoint.contains("vscode") || termProgram.lowercased().contains("vscode")
             || vscodeBundleIds.contains(where: { $0.lowercased() == bundleLower }) { return .vscode }
@@ -82,6 +89,9 @@ enum ClaudeSource: Equatable {
             Self.activateOrLaunch([Self.desktopBundleId])
         case .terminal(_, let bundleId):
             Self.activateOrLaunch(bundleId.map { [$0] } ?? Array(Self.terminals.keys))
+        case .coucou(let sessionId):
+            // Headless run: continue it interactively in Terminal
+            if let cwd { ClaudeCodeRunner.openInTerminal(sessionId: sessionId, cwd: cwd) }
         }
     }
 

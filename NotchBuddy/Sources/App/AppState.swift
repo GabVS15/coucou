@@ -199,8 +199,24 @@ final class AppState: ObservableObject {
     @Published var notionLoaded: Bool = false
     @Published var notionError: String? = nil
 
-    // Chat conversation history
+    // Chat tab — "Question" conversation (Claude API) and "Claude Code" conversation (claude -p)
     @Published var chatHistory: [ChatMessage] = []
+    @Published var codeChat: [ChatMessage] = []
+    @Published var chatMode: ChatMode = .code {
+        didSet { UserDefaults.standard.set(chatMode.rawValue, forKey: "chatMode") }
+    }
+    @Published var codeProject: String? = nil {        // folder the Claude Code runs start in
+        didSet { UserDefaults.standard.set(codeProject, forKey: "codeProject") }
+    }
+    @Published var codeSessionId: String? = nil       // conversation "Continue" resumes
+    @Published var codeRunning = false
+    @Published var recentProjects: [RecentProject] = []
+
+    /// Messages of the current chat mode.
+    var displayedChat: [ChatMessage] { chatMode == .code ? codeChat : chatHistory }
+
+    /// Chat view height grows with the conversation.
+    var chatPromptHeight: CGFloat { min(300, 240 + CGFloat(displayedChat.count) * 40) }
 
     // Pending approval request from Claude Code hook
     // Quick replies to Claude's closing question — persisted. Off → the Stop hook never waits.
@@ -229,6 +245,12 @@ final class AppState: ObservableObject {
         if let v = ud.object(forKey: "collapseOnOutsideClick") as? Bool { collapseOnOutsideClick = v }
         if let v = ud.object(forKey: "liveSessionEnabled") as? Bool { liveSessionEnabled = v }
         if let v = ud.object(forKey: "quickRepliesEnabled") as? Bool { quickRepliesEnabled = v }
+        if let v = ud.string(forKey: "chatMode"), let mode = ChatMode(rawValue: v) { chatMode = mode }
+        codeProject = ud.string(forKey: "codeProject")
+        ChatStore.load(into: self)
+        #if APPSTORE
+        chatMode = .question   // the sandbox can't run `claude`
+        #endif
         if let v = ud.object(forKey: "absenceInterval")   as? Double { absenceInterval   = v }
         if let v = ud.object(forKey: "greetThreshold")    as? Double { greetThresholdSeconds = v }
         if let v = ud.object(forKey: "hotkeyEnabled") as? Bool  { hotkeyEnabled = v }
@@ -513,10 +535,19 @@ struct NotionPage: Identifiable {
 
 // MARK: - Chat
 
-enum ChatRole { case user, assistant }
+enum ChatRole: String, Codable {
+    case user, assistant
+    case step    // Claude Code run: one line per tool used ("Edit AppState.swift")
+    case error
+}
 
-struct ChatMessage: Identifiable {
-    let id = UUID()
+struct ChatMessage: Identifiable, Codable {
+    var id = UUID()
     let role: ChatRole
-    let content: String
+    var content: String
+}
+
+/// Chat tab mode: run Claude Code in a project, or ask a question to the Claude API.
+enum ChatMode: String {
+    case code, question
 }

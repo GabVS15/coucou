@@ -108,34 +108,45 @@ final class ClaudeService {
 
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private let anthropicVersion = "2023-06-01"
-    private let model = "claude-sonnet-4-6"
+    private let model = "claude-sonnet-5-5"
 
     var apiKey: String? { KeychainStore.shared.get("anthropic-api-key") }
 
     // Multi-turn conversation messages (for API)
     private var conversationMessages: [[String: Any]] = []
 
-    func clearConversation() {
+    /// "New conversation": forgets the API turns and the displayed messages.
+    func clearConversation(state: AppState) {
         conversationMessages = []
+        state.chatHistory = []
+        ChatStore.save(state)
     }
 
     private let systemPrompt = """
-    You are Mochi, Louis's personal AI assistant embedded in the notch of his Mac. \
-    You have web search access and can help with absolutely anything — research, coding, finding places, recommendations, tasks, questions. \
-    Respond in the user's language. Be thorough and complete — use as much detail as the task requires. \
-    No markdown formatting (no **, no ##, no bullet dashes). Use plain text with line breaks.
+    You are Mochi, a personal assistant living in the notch of the user's Mac. \
+    You can search the web and help with anything: research, code, recommendations, quick questions. \
+    Answer in the user's language. The notch is small: be direct and concise, give details only when asked. \
+    Plain text with line breaks; **bold**, `code` and links are fine, but no headings, tables or bullet lists.
     """
 
     private let webSearchTools: [[String: Any]] = [
         ["type": "web_search_20250305", "name": "web_search", "max_uses": 5]
     ]
 
-    // MARK: - Chat (multi-turn, natural text + web search)
+    // MARK: - Chat (multi-turn, streamed, web search)
 
+    /// The user's message is already in `state.chatHistory`; the answer streams into a new message.
     func chat(query: String, context: PromptContext?, state: AppState) async {
         guard let key = apiKey, !key.isEmpty else {
-            await showError("API key missing. Open settings.", state: state)
+            chatFailed("Anthropic API key missing. Add it in Settings to ask questions.", state: state)
             return
+        }
+
+        // After a relaunch the displayed conversation comes back from disk: resend it as text
+        if conversationMessages.isEmpty {
+            for msg in state.chatHistory.dropLast() where msg.role == .user || msg.role == .assistant {
+                conversationMessages.append(["role": msg.role == .user ? "user" : "assistant", "content": msg.content])
+            }
         }
 
         // Build user content for this turn
@@ -162,18 +173,90 @@ final class ClaudeService {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 4096,
+            "stream": true,
             "tools": webSearchTools,
             "system": systemPrompt,
             "messages": conversationMessages,
         ]
 
+        var answerIndex: Int?
+        var answer = ""
         do {
-            let data = try await callAPI(body: body, key: key, beta: "web-search-2025-03-05")
-            await handleChatResult(data, state: state)
+            let request = try makeRequest(body: body, key: key, beta: "web-search-2025-03-05")
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                var message = ""
+                for try await line in bytes.lines { message += line }
+                throw NSError(domain: "Claude", code: http.statusCode,
+                              userInfo: [NSLocalizedDescriptionKey: Self.apiErrorMessage(message)])
+            }
+
+            var textBlocks = 0
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: "),
+                      let event = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(6).utf8)) as? [String: Any]
+                else { continue }
+                switch event["type"] as? String {
+                case "content_block_start":
+                    // Text around web searches comes in several blocks: keep them apart
+                    if (event["content_block"] as? [String: Any])?["type"] as? String == "text" {
+                        if textBlocks > 0 && !answer.isEmpty { answer += "\n\n" }
+                        textBlocks += 1
+                    }
+                case "content_block_delta":
+                    guard let delta = event["delta"] as? [String: Any],
+                          delta["type"] as? String == "text_delta",
+                          let piece = delta["text"] as? String else { continue }
+                    answer += piece
+                    if let i = answerIndex, i < state.chatHistory.count {
+                        state.chatHistory[i].content = answer
+                    } else {
+                        state.stateOverride = nil   // first words: the typing dots give way to the answer
+                        state.chatHistory.append(ChatMessage(role: .assistant, content: answer))
+                        answerIndex = state.chatHistory.count - 1
+                    }
+                case "error":
+                    let message = (event["error"] as? [String: Any])?["message"] as? String ?? "Stream error"
+                    throw NSError(domain: "Claude", code: 0, userInfo: [NSLocalizedDescriptionKey: message])
+                default:
+                    break
+                }
+            }
         } catch {
-            conversationMessages.removeLast()
-            await showError("Network error: \(error.localizedDescription)", state: state)
+            if answer.isEmpty {
+                conversationMessages.removeLast()
+                chatFailed(error.localizedDescription, state: state)
+                return
+            }
+            // Cut off mid-answer: keep what arrived
         }
+
+        let final = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !final.isEmpty else {
+            conversationMessages.removeLast()
+            chatFailed("No answer.", state: state)
+            return
+        }
+        conversationMessages.append(["role": "assistant", "content": final])
+        if let i = answerIndex, i < state.chatHistory.count { state.chatHistory[i].content = final }
+        state.stateOverride = nil
+        ChatStore.save(state)
+        NotificationCenter.default.post(name: .triggerEmote, object: BotEmote.happy)
+    }
+
+    private func chatFailed(_ message: String, state: AppState) {
+        state.chatHistory.append(ChatMessage(role: .error, content: message))
+        state.stateOverride = nil
+        ChatStore.save(state)
+    }
+
+    /// `{"type":"error","error":{"message":"…"}}` → its message.
+    private static func apiErrorMessage(_ body: String) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any],
+              let message = (json["error"] as? [String: Any])?["message"] as? String else {
+            return body.isEmpty ? "Request failed." : body
+        }
+        return message
     }
 
     // MARK: - Structured search (M8 — window attach + web search)
@@ -229,7 +312,7 @@ final class ClaudeService {
 
     // MARK: - API call
 
-    private func callAPI(body: [String: Any], key: String, beta: String? = nil) async throws -> Data {
+    private func makeRequest(body: [String: Any], key: String, beta: String? = nil) throws -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -237,6 +320,12 @@ final class ClaudeService {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         if let beta { request.setValue(beta, forHTTPHeaderField: "anthropic-beta") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 60
+        return request
+    }
+
+    private func callAPI(body: [String: Any], key: String, beta: String? = nil) async throws -> Data {
+        var request = try makeRequest(body: body, key: key, beta: beta)
         request.timeoutInterval = 45
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -246,32 +335,6 @@ final class ClaudeService {
             throw NSError(domain: "Claude", code: 0, userInfo: [NSLocalizedDescriptionKey: msg])
         }
         return data
-    }
-
-    // MARK: - Chat result handler
-
-    private func handleChatResult(_ data: Data, state: AppState) async {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = json["content"] as? [[String: Any]] else {
-            await showError("Unexpected API response.", state: state)
-            return
-        }
-
-        // Store full content (includes tool_use/tool_result blocks) for correct multi-turn context
-        conversationMessages.append(["role": "assistant", "content": content])
-
-        guard let textBlock = content.first(where: { $0["type"] as? String == "text" }),
-              let text = textBlock["text"] as? String, !text.isEmpty else {
-            await showError("No response text.", state: state)
-            return
-        }
-
-        // Add to display history
-        state.chatHistory.append(ChatMessage(role: .assistant, content: text.trimmingCharacters(in: .whitespacesAndNewlines)))
-
-        state.stateOverride = nil
-        state.view = .prompt
-        NotificationCenter.default.post(name: .triggerEmote, object: BotEmote.happy)
     }
 
     // MARK: - Structured result handler

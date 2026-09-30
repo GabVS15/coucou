@@ -153,7 +153,7 @@ final class HookServer: @unchecked Sendable {
         let rawName = URL(fileURLWithPath: cwd).lastPathComponent
         let projectName = aliasProjectName(rawName.isEmpty ? "Session" : rawName)
 
-        // VS Code, Claude Desktop and terminals; headless runs (claude -p, SDK scripts) are ignored
+        // VS Code, Claude Desktop, terminals and Coucou chat runs; other headless runs (claude -p, SDK scripts) are ignored
         guard let source = ClaudeSource.detect(payload) else {
             nbLog("Ignored \(name) (\(Self.sourceFields(payload)))")
             return
@@ -532,7 +532,7 @@ final class HookServer: @unchecked Sendable {
 
     /// Where the event came from, for the log (no command or code).
     private static func sourceFields(_ payload: [String: Any]) -> String {
-        ["entrypoint", "term_program", "bundle_id"]
+        ["entrypoint", "term_program", "bundle_id", "coucou_task"]
             .map { "\($0)=\(payload[$0] as? String ?? "")" }
             .joined(separator: " ")
     }
@@ -896,6 +896,7 @@ def main():
     payload.setdefault('term_session_id', env.get('TERM_SESSION_ID', ''))
     payload.setdefault('bundle_id', env.get('__CFBundleIdentifier', ''))
     payload.setdefault('entrypoint', env.get('CLAUDE_CODE_ENTRYPOINT', ''))
+    payload.setdefault('coucou_task', env.get('COUCOU_TASK', ''))  # run launched from Coucou's chat
     if 'cwd' not in payload or not payload['cwd']:
         payload['cwd'] = os.getcwd()
 
@@ -1015,6 +1016,7 @@ def main():
     payload.setdefault('term_session_id', env.get('TERM_SESSION_ID', ''))
     payload.setdefault('bundle_id', env.get('__CFBundleIdentifier', ''))
     payload.setdefault('entrypoint', env.get('CLAUDE_CODE_ENTRYPOINT', ''))
+    payload.setdefault('coucou_task', env.get('COUCOU_TASK', ''))  # run launched from Coucou's chat
     if 'cwd' not in payload or not payload['cwd']:
         payload['cwd'] = os.getcwd()
 

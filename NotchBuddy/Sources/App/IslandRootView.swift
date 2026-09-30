@@ -37,11 +37,7 @@ struct IslandContainer: View {
         insertion: .opacity,
         removal: .opacity.animation(.easeOut(duration: 0.16)))
 
-    private var chatPromptHeight: CGFloat {
-        let base: CGFloat = 240
-        let perMsg: CGFloat = 40
-        return min(300, base + CGFloat(state.chatHistory.count) * perMsg)
-    }
+    private var chatPromptHeight: CGFloat { state.chatPromptHeight }
 
     /// Pixels the content must be pushed down to clear the concave ear transparent area.
     /// = 0 in expanded mode (no ears), = earRadius in compact/notch mode.
@@ -154,7 +150,7 @@ struct IslandContainer: View {
                 islandHeight = newView == .prompt ? chatPromptHeight : h
             }
         }
-        .onChange(of: state.chatHistory.count) { _, _ in
+        .onChange(of: state.chatPromptHeight) { _, _ in
             guard state.mode == .expanded, state.view == .prompt else { return }
             withAnimation(openSpring) { islandHeight = chatPromptHeight }
         }

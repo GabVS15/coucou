@@ -760,42 +760,36 @@ struct PromptView: View {
     @State private var text: String = ""
     @FocusState private var focused: Bool
 
+    private var codeMode: Bool { state.chatMode == .code }
+    private var messages: [ChatMessage] { state.displayedChat }
+    private var busy: Bool { codeMode ? state.codeRunning : state.stateOverride == .thinking }
+
     var body: some View {
         ZStack(alignment: .leading) {
             CardBackground(wash: .indigo)
 
             VStack(alignment: .leading, spacing: 6) {
-                if let ctx = state.promptContext {
-                    ContextChip(context: ctx).padding(.top, 4)
-                }
+                ChatTopBar(state: state).padding(.top, 4)
 
-                if !state.chatHistory.isEmpty {
+                if !messages.isEmpty {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 6) {
-                                ForEach(state.chatHistory) { msg in
+                                ForEach(messages) { msg in
                                     ChatBubble(message: msg).id(msg.id)
                                 }
-                                if state.stateOverride != nil {
+                                // Waiting for the first words (Question) or for Claude Code to finish
+                                if busy && (codeMode || messages.last?.role == .user) {
                                     HStack { TypingDotsView(); Spacer(minLength: 32) }
                                         .id("typing")
                                 }
                             }
                             .padding(.vertical, 2)
                         }
-                        .onChange(of: state.chatHistory.count) { _, _ in
-                            if let last = state.chatHistory.last {
-                                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                            }
-                        }
-                        .onChange(of: state.stateOverride) { _, v in
-                            if v != nil { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
-                        }
-                        .onAppear {
-                            if let last = state.chatHistory.last {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
-                        }
+                        .onChange(of: messages.count) { _, _ in scrollToEnd(proxy) }
+                        .onChange(of: messages.last?.content) { _, _ in scrollToEnd(proxy, animated: false) }
+                        .onChange(of: busy) { _, _ in scrollToEnd(proxy) }
+                        .onAppear { scrollToEnd(proxy, animated: false) }
                     }
                     .frame(maxHeight: .infinity)
                 } else {
@@ -803,19 +797,30 @@ struct PromptView: View {
                 }
 
                 HStack(spacing: 8) {
-                    TextField(state.chatHistory.isEmpty ? "Ask me anything…" : "Continue…", text: $text)
+                    TextField(placeholder, text: $text)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .focused($focused)
                         .onSubmit { sendMessage() }
+                        .disabled(codeMode && state.codeProject == nil)
 
-                    Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color(hex: "#0B0C0E"))
+                    if codeMode && state.codeRunning {
+                        Button(action: { ClaudeCodeRunner.shared.stop() }) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .help("Stop Claude Code")
+                    } else {
+                        Button(action: sendMessage) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || busy)
                     }
-                    .buttonStyle(SendButtonStyle())
-                    .disabled(text.isEmpty)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(Color.white.opacity(0.07))
@@ -831,10 +836,27 @@ struct PromptView: View {
         .onAppear { focused = true }
     }
 
+    private var placeholder: String {
+        guard codeMode else { return state.chatHistory.isEmpty ? "Ask me anything…" : "Continue…" }
+        guard let project = state.codeProject else { return "Choose a project first" }
+        let name = URL(fileURLWithPath: project).lastPathComponent
+        return state.codeChat.isEmpty ? "Ask Claude Code in \(name)…" : "Continue in \(name)…"
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let target: AnyHashable? = busy && (codeMode || messages.last?.role == .user) ? AnyHashable("typing") : messages.last.map { AnyHashable($0.id) }
+        guard let target else { return }
+        if animated { withAnimation { proxy.scrollTo(target, anchor: .bottom) } } else { proxy.scrollTo(target, anchor: .bottom) }
+    }
+
     private func sendMessage() {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
+        guard !query.isEmpty, !busy else { return }
         text = ""
+        if codeMode {
+            ClaudeCodeRunner.shared.send(query, state: state)
+            return
+        }
         focused = false
         state.chatHistory.append(ChatMessage(role: .user, content: query))
         state.stateOverride = .thinking
@@ -845,13 +867,145 @@ struct PromptView: View {
     }
 }
 
+/// Mode switch (Claude Code / Question), project or context chip, terminal and new-conversation buttons.
+struct ChatTopBar: View {
+    @ObservedObject var state: AppState
+
+    private var codeMode: Bool { state.chatMode == .code }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            #if !APPSTORE
+            HStack(spacing: 2) {
+                modeButton("Claude Code", mode: .code)
+                modeButton("Question", mode: .question)
+            }
+            .padding(2)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            #endif
+
+            if codeMode {
+                projectMenu
+            } else if let ctx = state.promptContext {
+                ContextChip(context: ctx)
+            }
+
+            Spacer(minLength: 4)
+
+            if codeMode, let id = state.codeSessionId, let cwd = state.codeProject, !state.codeRunning {
+                iconButton("terminal", help: "Continue in Terminal") {
+                    ClaudeCodeRunner.openInTerminal(sessionId: id, cwd: cwd)
+                }
+            }
+            if !state.displayedChat.isEmpty {
+                iconButton("square.and.pencil", help: "New conversation") { newConversation() }
+                    .disabled(codeMode ? state.codeRunning : state.stateOverride == .thinking)
+            }
+        }
+        .onAppear { loadProjects() }
+        .onChange(of: state.chatMode) { _, _ in loadProjects() }
+    }
+
+    private func modeButton(_ title: String, mode: ChatMode) -> some View {
+        let selected = state.chatMode == mode
+        return Button(action: { state.chatMode = mode }) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(selected ? Color(hex: "#0C0D10") : Color(hex: "#9398A1"))
+                .padding(.horizontal, 8)
+                .frame(height: 18)
+                .background(Capsule().fill(selected ? Color(hex: "#F5F6F8") : Color.clear))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var projectMenu: some View {
+        Menu {
+            ForEach(state.recentProjects) { project in
+                Button(project.name) { select(project.path) }
+            }
+            if !state.recentProjects.isEmpty { Divider() }
+            Button("Choose a folder…") { chooseFolder() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "folder.fill").font(.system(size: 9))
+                Text(state.codeProject.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Project")
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .foregroundColor(Color(hex: "#F1F2F4"))
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background(Capsule().fill(Color.white.opacity(0.1)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(state.codeRunning)
+    }
+
+    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Color(hex: "#9398A1"))
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.white.opacity(0.06)))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Another project starts another conversation.
+    private func select(_ path: String) {
+        guard path != state.codeProject else { return }
+        state.codeProject = path
+        state.codeChat = []
+        state.codeSessionId = nil
+        ChatStore.save(state)
+    }
+
+    private func newConversation() {
+        if codeMode {
+            state.codeChat = []
+            state.codeSessionId = nil
+            ChatStore.save(state)
+        } else {
+            state.promptContext = nil
+            ClaudeService.shared.clearConversation(state: state)
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK, let url = panel.url { select(url.path) }
+    }
+
+    private func loadProjects() {
+        guard codeMode else { return }
+        Task.detached(priority: .utility) {
+            let projects = RecentProjects.load()
+            await MainActor.run {
+                state.recentProjects = projects
+                if state.codeProject == nil { state.codeProject = projects.first?.path }
+            }
+        }
+    }
+}
 
 struct ChatBubble: View {
     let message: ChatMessage
 
     var body: some View {
         HStack(alignment: .top) {
-            if message.role == .user {
+            switch message.role {
+            case .user:
                 Spacer(minLength: 32)
                 Text(message.content)
                     .font(.system(size: 12.5))
@@ -861,15 +1015,40 @@ struct ChatBubble: View {
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Color.white.opacity(0.13))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                Text(message.content)
+            case .assistant:
+                Text(Self.markdown(message.content))
                     .font(.system(size: 12.5))
                     .foregroundColor(Color(hex: "#B0B5BE"))
+                    .tint(Color(hex: "#A5B4FC"))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Spacer(minLength: 8)
+            case .step:
+                HStack(spacing: 6) {
+                    Circle().fill(Color(hex: "#6B7079")).frame(width: 4, height: 4)
+                    Text(message.content)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "#6B7079"))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+            case .error:
+                Text(message.content)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(hex: "#F87171"))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .lineLimit(6)
+                Spacer(minLength: 8)
             }
         }
+    }
+
+    /// **bold**, `code` and links; everything else stays plain text.
+    static func markdown(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }
 

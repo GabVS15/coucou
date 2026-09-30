@@ -131,6 +131,12 @@ final class HookServer: @unchecked Sendable {
 
         let focused = state.focusId == "integration_claude"
 
+        // Live session view: diff and terminal output stay in memory, never logged
+        if state.liveSessionEnabled {
+            let updated = LiveSessionParser.apply(event: name, payload: payload, to: state.liveSession)
+            if updated != state.liveSession { state.liveSession = updated }
+        }
+
         switch name {
 
         case "SessionStart":
@@ -157,7 +163,7 @@ final class HookServer: @unchecked Sendable {
             let input = payload["tool_input"] as? [String: Any] ?? [:]
             let step = frenchStep(tool: tool, input: input)
             appendStep(id: "integration_claude", step: step)
-            nbLog("PreToolUse \(step)")
+            nbLog("PreToolUse \(tool)")   // tool name only: commands and code never reach the log
 
         case "PostToolUse":
             state.updateTask(id: "integration_claude", state: .working)
@@ -183,7 +189,9 @@ final class HookServer: @unchecked Sendable {
                 appendStep(id: "integration_claude", step: String(message.prefix(60)))
             }
             SoundEngine.shared.play("finish")
-            if focused {
+            if focused && state.mode == .expanded && state.view == .liveSession {
+                // Stay on the live view: its Done step shows the end of the turn
+            } else if focused {
                 expandIfNeeded(to: .finished)
             } else {
                 setPillBadge(id: "integration_claude", badge: .finished)
@@ -206,6 +214,8 @@ final class HookServer: @unchecked Sendable {
             activeSessionId = nil
             state.updateTask(id: "integration_claude", state: .idle)
             clearSession()
+            state.liveSession = LiveSession()
+            if state.view == .liveSession { state.view = .overview }
 
         case "SubagentStart":
             appendStep(id: "integration_claude", step: "+ subagent")
@@ -268,7 +278,7 @@ final class HookServer: @unchecked Sendable {
         if let input = payload["tool_input"] as? [String: Any] {
             command = input["command"] as? String ?? tool
         }
-        nbLog("PermissionRequest \(tool): \(command)")
+        nbLog("PermissionRequest \(tool)")   // tool name only: commands never reach the log
 
         if pendingApprovalFD >= 0 {
             let old = pendingApprovalFD

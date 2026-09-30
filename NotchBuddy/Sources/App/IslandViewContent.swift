@@ -25,6 +25,7 @@ struct IslandViewContent: View {
         case .note:      NoteView(state: state)
         case .settings:  SettingsIslandView(state: state)
         case .greeting:  EmptyView()  // GreetingCanvasView overlaid in IslandRootView
+        case .liveSession: LiveSessionView(state: state)
         }
     }
 }
@@ -104,6 +105,8 @@ struct OverviewView: View {
                 }
             }
             .frame(width: 322)
+            .contentShape(RoundedRectangle(cornerRadius: 20))
+            .onTapGesture { openLiveSession() }
 
             // Right card: agent pills
             CardBackground(wash: nil) {
@@ -111,6 +114,13 @@ struct OverviewView: View {
             }
         }
         .onChange(of: state.focusId) { _, _ in showingN8nDetail = false }
+    }
+
+    /// Click on the Claude Code card → live session view (when enabled and a session is running).
+    private func openLiveSession() {
+        guard state.liveSessionEnabled, let agent, agent.id == "integration_claude",
+              agent.state != .idle || !agent.steps.isEmpty else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { state.view = .liveSession }
     }
 
     private func openAgentTarget(_ task: AgentTask?) {

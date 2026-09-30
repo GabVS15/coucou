@@ -100,6 +100,21 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(collapseOnOutsideClick, forKey: "collapseOnOutsideClick") }
     }
 
+    // Live Claude Code session view (file diff + terminal) — persisted.
+    // Off → nothing from the hooks' code is kept in memory.
+    @Published var liveSessionEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(liveSessionEnabled, forKey: "liveSessionEnabled")
+            if !liveSessionEnabled {
+                liveSession = LiveSession()
+                if view == .liveSession { view = .overview }
+            }
+        }
+    }
+
+    // Current Claude Code session shown in the live view — memory only, never persisted or logged
+    @Published var liveSession = LiveSession()
+
     // Absence interval — persisted
     var absenceInterval: TimeInterval = 3 * 60 {
         didSet { UserDefaults.standard.set(absenceInterval, forKey: "absenceInterval") }
@@ -197,6 +212,7 @@ final class AppState: ObservableObject {
             autoCloseInterval = (v == 60) ? 15 : v
         }
         if let v = ud.object(forKey: "collapseOnOutsideClick") as? Bool { collapseOnOutsideClick = v }
+        if let v = ud.object(forKey: "liveSessionEnabled") as? Bool { liveSessionEnabled = v }
         if let v = ud.object(forKey: "absenceInterval")   as? Double { absenceInterval   = v }
         if let v = ud.object(forKey: "greetThreshold")    as? Double { greetThresholdSeconds = v }
         if let v = ud.object(forKey: "hotkeyEnabled") as? Bool  { hotkeyEnabled = v }

@@ -262,6 +262,7 @@ struct SettingsView: View {
                             Text("s inactive")
                         }
                         Toggle("Close when clicking outside the island", isOn: $state.collapseOnOutsideClick)
+                        Toggle("Show live Claude Code session (file diff and terminal)", isOn: $state.liveSessionEnabled)
                         HStack(spacing: 8) {
                             Text("Hide after")
                             TextField("3", value: absenceMinutes, format: .number)

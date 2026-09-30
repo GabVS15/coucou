@@ -36,9 +36,10 @@ private let GEAR_HB:CGFloat = 17               // ear body height
 private let GCARD   = CGRect(x: 10, y: 36, width: 620, height: 104)
 private let GCARD_R:CGFloat = 20
 
-// Small island = compact mode size (matches islandSize for .compact)
-private var GSMALL_W: CGFloat { IslandConst.notchWidth + IslandConst.compactExtraWidth }
-private let GSMALL_H: CGFloat = IslandConst.notchHeight
+// Small island = compact mode size (matches islandSize for .compact).
+// Divided by expandedScale: this canvas is drawn inside the scaled expanded island.
+private var GSMALL_W: CGFloat { (IslandConst.notchWidth + IslandConst.compactExtraWidth) / IslandConst.expandedScale }
+private let GSMALL_H: CGFloat = IslandConst.notchHeight / IslandConst.expandedScale
 
 // MARK: - Easing (mirrors E = {...})
 
@@ -105,8 +106,8 @@ private func greetPose(_ t: Double) -> GreetPose {
     // island size interpolation (used as reference for clip, not drawn)
     let gx = gSeg(t, 0, 0.5)
     let g  = sin(.pi*gx/2) + 0.04*sin(.pi*gx)*gx
-    let iw = gLerp(Double(IslandConst.notchWidth), 640, g)
-    let ih = gLerp(Double(IslandConst.notchHeight), 150, g)
+    let iw = gLerp(Double(IslandConst.notchWidth / IslandConst.expandedScale), 640, g)
+    let ih = gLerp(Double(IslandConst.notchHeight / IslandConst.expandedScale), 150, g)
 
     // body grows with back-ease (tiny → full size)
     let gg = GE.back(gSeg(t, 0.02, GT.grow))

@@ -26,7 +26,8 @@ struct IslandContainer: View {
     @State private var islandHeight: CGFloat = IslandConst.notchHeight
     @State private var cornerRadius: CGFloat = IslandConst.roundedCorner
     // topRadius > 0 → convex expanded corners; < 0 → concave ear cutouts
-    @State private var islandTopRadius: CGFloat = IslandConst.compactTopCorner
+    @State private var islandTopRadius: CGFloat = 0
+    @State private var islandScale: CGFloat = 1
     @State private var greetNotif: Bool = false
 
     private let openSpring = Animation.spring(response: 0.5, dampingFraction: 0.72)
@@ -110,6 +111,7 @@ struct IslandContainer: View {
             .animation(.easeInOut(duration: 0.25), value: state.mode == .compact)
         }
         .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
+        .scaleEffect(islandScale, anchor: .top)
         .onChange(of: state.mode) { oldMode, newMode in
             let shrinking = modeOrder(newMode) < modeOrder(oldMode)
             let anim = shrinking ? closeEase : openSpring
@@ -117,12 +119,13 @@ struct IslandContainer: View {
                                     progress: state.uploadProgress,
                                     nw: state.notchWidth, nh: state.notchHeight)
             let cr  = newMode == .expanded ? IslandConst.expandedCorner : IslandConst.roundedCorner
-            let tr: CGFloat = newMode == .expanded ? 0 : IslandConst.compactTopCorner
+            let tr: CGFloat = 0
             withAnimation(anim) {
                 islandWidth      = w
                 islandHeight     = (newMode == .expanded && state.view == .prompt) ? chatPromptHeight : h
                 cornerRadius     = cr
                 islandTopRadius  = tr
+                islandScale      = islandDisplayScale(newMode)
             }
         }
         .onChange(of: state.view) { _, newView in
@@ -151,7 +154,8 @@ struct IslandContainer: View {
             islandWidth      = w
             islandHeight     = state.view == .prompt ? chatPromptHeight : h
             cornerRadius     = state.mode == .expanded ? IslandConst.expandedCorner : IslandConst.roundedCorner
-            islandTopRadius  = state.mode == .expanded ? 0 : IslandConst.compactTopCorner
+            islandTopRadius  = 0
+            islandScale      = islandDisplayScale(state.mode)
         }
         .onReceive(NotificationCenter.default.publisher(for: .botGreet)) { _ in
             greetNotif.toggle()

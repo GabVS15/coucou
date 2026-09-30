@@ -99,7 +99,8 @@ struct BotCanvasView: View {
                                             islandW: islandW, islandH: islandH,
                                             uploadProgress: state.uploadProgress)
         // Island is centered on screen; bot is at botCx within island coords
-        let botScreenX = screen.frame.midX - islandW / 2 + botCx
+        let k = islandDisplayScale(state.mode)
+        let botScreenX = screen.frame.midX - (islandW / 2 - botCx) * k
         return tanh((state.mousePosition.x - botScreenX) / 260)
     }
 
@@ -114,7 +115,7 @@ struct BotCanvasView: View {
                                              islandW: islandW, islandH: actualH,
                                              uploadProgress: state.uploadProgress)
         // Island top = screen top → bot screen Y = botCy from island top
-        return -tanh((state.mousePosition.y - botCy) / 200)
+        return -tanh((state.mousePosition.y - botCy * islandDisplayScale(state.mode)) / 200)
     }
 }
 

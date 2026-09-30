@@ -660,11 +660,12 @@ final class IslandWindowController: NSWindowController {
     func windowToIsland(_ loc: CGPoint) -> CGPoint {
         let panelH = window?.frame.height ?? 320
         let panelW = window?.frame.width  ?? 720
-        let islandLeft = (panelW - IslandConst.expandedWidth) / 2
+        let k = islandDisplayScale(.expanded)
+        let islandLeft = (panelW - IslandConst.expandedWidth * k) / 2
         // Island is glued to panel top; its bottom in AppKit = panelH - 176
         return CGPoint(
-            x: loc.x - islandLeft,
-            y: panelH - loc.y                // AppKit y is from bottom; island y from top
+            x: (loc.x - islandLeft) / k,
+            y: (panelH - loc.y) / k          // AppKit y is from bottom; island y from top
         )
     }
 
@@ -737,15 +738,16 @@ final class IslandWindowController: NSWindowController {
         } else {
             islandH = fixedH
         }
-        let islandMinX = (panelW - islandW) / 2
+        let k = islandDisplayScale(s.mode)
+        let islandMinX = (panelW - islandW * k) / 2
         let (cx, cy, diameter, _) = botPosition(mode: s.mode, view: s.view,
                                                   islandW: islandW, islandH: islandH,
                                                   uploadProgress: s.uploadProgress)
-        let radius = (diameter / 0.6) / 2
+        let radius = (diameter / 0.6) / 2 * k
         // botPosition cy is from island TOP; panel AppKit coords have y=0 at bottom
         // island top in AppKit coords = panelH (island glued to top of panel/screen)
-        let botX = islandMinX + cx
-        let botY = panelH - cy
+        let botX = islandMinX + cx * k
+        let botY = panelH - cy * k
         let dx = windowPoint.x - botX
         let dy = windowPoint.y - botY
         return dx*dx + dy*dy <= radius * radius
@@ -804,7 +806,9 @@ final class IslandPanel: NSPanel {
         } else {
             h = fixedH
         }
-        return CGRect(x: (frame.width - w) / 2, y: frame.height - h, width: w, height: h)
+        let k = islandDisplayScale(s.mode)
+        return CGRect(x: (frame.width - w * k) / 2, y: frame.height - h * k,
+                      width: w * k, height: h * k)
     }
 }
 
@@ -848,6 +852,11 @@ extension Notification.Name {
 }
 
 // MARK: - islandSize (takes real notch dimensions)
+
+/// Scale the island is drawn at: expanded views are shrunk, notch-sized modes are not.
+func islandDisplayScale(_ mode: IslandMode) -> CGFloat {
+    mode == .expanded ? IslandConst.expandedScale : 1
+}
 
 func islandSize(mode: IslandMode, view: IslandView,
                 progress: Double = 0,

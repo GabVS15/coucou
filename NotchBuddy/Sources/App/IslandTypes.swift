@@ -31,10 +31,14 @@ enum BotEmote: String, CaseIterable {
 
 // MARK: - Approval info (pending PermissionRequest from Claude Code)
 
-struct ApprovalInfo: Sendable {
+struct ApprovalInfo: Sendable, Identifiable, Equatable {
+    let id = UUID()
     var sessionId: String
+    var taskId: String        // pill of the session asking
     var tool: String
     var command: String
+    var project: String = ""
+    var sourceLabel: String = ""
 }
 
 // MARK: - Pill badge (shown on pill edge when non-focused task has an alert)
@@ -57,6 +61,11 @@ struct AgentTask: Identifiable, Equatable {
     var pillBadge: PillBadge? = nil  // alert badge shown on pill when not focused
     var sessionCwd: String?  = nil  // last known working directory (Claude Code sessions)
     var claudeSource: ClaudeSource? = nil  // app the Claude Code session runs in
+    var projectName: String? = nil         // raw project name of a Claude Code session (pill label source)
+
+    /// One pill per running Claude Code session: "claude:<session_id>".
+    static let claudeSessionPrefix = "claude:"
+    var isClaudeSession: Bool { id.hasPrefix(Self.claudeSessionPrefix) }
 }
 
 enum AgentSource: Equatable {

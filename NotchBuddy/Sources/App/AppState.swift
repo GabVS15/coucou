@@ -106,14 +106,17 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(liveSessionEnabled, forKey: "liveSessionEnabled")
             if !liveSessionEnabled {
-                liveSession = LiveSession()
+                liveSessions = [:]
                 if view == .liveSession { view = .overview }
             }
         }
     }
 
-    // Current Claude Code session shown in the live view — memory only, never persisted or logged
-    @Published var liveSession = LiveSession()
+    // Live data per Claude Code session, keyed by task id — memory only, never persisted or logged
+    @Published var liveSessions: [String: LiveSession] = [:]
+
+    /// Live data of the session in focus (the live view shows this one).
+    var focusedLiveSession: LiveSession { liveSessions[focusId ?? ""] ?? LiveSession() }
 
     // Absence interval — persisted
     var absenceInterval: TimeInterval = 3 * 60 {
@@ -200,7 +203,9 @@ final class AppState: ObservableObject {
     @Published var chatHistory: [ChatMessage] = []
 
     // Pending approval request from Claude Code hook
-    @Published var pendingApproval: ApprovalInfo? = nil
+    // Permission requests waiting for a click, oldest first; the approval view shows the first one
+    @Published var approvalQueue: [ApprovalInfo] = []
+    var pendingApproval: ApprovalInfo? { approvalQueue.first }
 
     // MARK: - Init (loads persisted settings)
 
@@ -290,12 +295,15 @@ final class AppState: ObservableObject {
     /// Load integration pills respecting activeIntegrations. Claude Code always loads. Safe to call multiple times.
     func loadIntegrationTasks() {
         for task in AgentTask.integrationAgents {
-            let shouldLoad = task.id == "integration_claude" || activeIntegrations.contains(task.id)
+            // The Claude Code placeholder pill only shows while no session is running
+            let shouldLoad = task.id == "integration_claude"
+                ? !tasks.contains(where: \.isClaudeSession)
+                : activeIntegrations.contains(task.id)
             let loaded = tasks.contains(where: { $0.id == task.id })
             if shouldLoad && !loaded { tasks.append(task) }
             if !shouldLoad && loaded { tasks.removeAll { $0.id == task.id } }
         }
-        if focusId == nil { focusId = "integration_claude" }
+        if focusId == nil { focusId = tasks.first?.id }
         syncMode()
     }
 
@@ -305,7 +313,7 @@ final class AppState: ObservableObject {
         if activeIntegrations.contains(id) {
             activeIntegrations.remove(id)
             tasks.removeAll { $0.id == id }
-            if focusId == id { focusId = "integration_claude" }
+            if focusId == id { focusId = tasks.first?.id }
         } else {
             guard activeIntegrations.count < 4 else { return }
             activeIntegrations.insert(id)

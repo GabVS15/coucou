@@ -55,13 +55,15 @@ struct OverviewView: View {
                                 Circle()
                                     .fill(Color(hex: agent.color))
                                     .frame(width: 7, height: 7)
-                                Text(agent.name)
+                                Text(agent.projectName ?? agent.name)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(Color(hex: "#F5F6F8"))
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                     .layoutPriority(1)
-                                Text(agent.source == .claudeCode ? "Claude Code" : "n8n")
+                                Text(agent.source == .claudeCode
+                                     ? agent.claudeSource.map { "Claude Code · \($0.label)" } ?? "Claude Code"
+                                     : "n8n")
                                     .font(.system(size: 11))
                                     .foregroundColor(Color(hex: "#8E939C"))
                                     .lineLimit(1)
@@ -122,8 +124,8 @@ struct OverviewView: View {
         guard let agent else { return }
         let target: IslandView
         switch agent.id {
-        case "integration_claude":
-            guard state.liveSessionEnabled, agent.state != .idle || !agent.steps.isEmpty else { return }
+        case _ where agent.isClaudeSession:
+            guard state.liveSessionEnabled else { return }
             target = .liveSession
         case "integration_github":
             guard state.githubActivity != nil else { return }
@@ -157,7 +159,9 @@ struct OverviewView: View {
             NSWorkspace.shared.open(URL(string: "https://app.cal.com/bookings")!)
         default:
             // Non-integration real tasks
-            if task.source == .n8n {
+            if task.isClaudeSession {
+                (task.claudeSource ?? .vscode).open(cwd: task.sessionCwd)
+            } else if task.source == .n8n {
                 if let urlStr = KeychainStore.shared.get("n8n-url"), let url = URL(string: urlStr) {
                     NSWorkspace.shared.open(url)
                 }
@@ -210,11 +214,34 @@ struct ApprovalView: View {
 
     var approval: ApprovalInfo? { state.pendingApproval }
 
+    /// Pill of the session asking (not necessarily the one in focus).
+    private var requester: AgentTask? {
+        state.tasks.first { $0.id == approval?.taskId } ?? state.focusTask
+    }
+
+    /// "needs permission", with the source when the pill name doesn't already carry it.
+    private var requesterLabel: String {
+        guard let source = approval?.sourceLabel, !source.isEmpty,
+              requester?.name.contains(source) == false else { return "needs permission" }
+        return "· \(source) needs permission"
+    }
+
     var body: some View {
         ZStack {
             CardBackground(wash: .amber)
             VStack(alignment: .leading, spacing: 5) {
-                AgentWho(task: state.focusTask, label: "needs permission")
+                HStack(spacing: 6) {
+                    AgentWho(task: requester, label: requesterLabel)
+                    Spacer(minLength: 4)
+                    if state.approvalQueue.count > 1 {
+                        Text("1/\(state.approvalQueue.count)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Color(hex: "#F5A524"))
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Color(hex: "#F5A524").opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+                }
                 CodeBlock(text: approval?.command ?? approval?.tool ?? "…")
                 HStack(spacing: 8) {
                     SecondaryButton("Deny") {
@@ -2186,14 +2213,59 @@ struct TickerShimmerText: View {
 struct AgentPillsView: View {
     @ObservedObject var state: AppState
     @State private var swapping = false
+    @State private var showAll = false        // "+N" tapped: every pill of the tab, scrollable
+    @State private var chosenTab: PillTab? = nil  // nil = automatic
+
+    enum PillTab { case sessions, integrations }
+
+    private static let slots = 4
+
+    /// Claude Code sessions (and the "Claude Code" placeholder) vs. GitHub, Vercel, Stripe…
+    private static func tab(of task: AgentTask) -> PillTab {
+        task.isClaudeSession || task.id == AppState.claudePlaceholderId ? .sessions : .integrations
+    }
+
+    /// Pills of a tab except the focused one, most urgent first.
+    private func pills(in tab: PillTab) -> [AgentTask] {
+        state.orderedOtherTasks.filter { Self.tab(of: $0) == tab }
+    }
+
+    /// The tab the user picked while it has pills; otherwise Sessions first, then Integrations.
+    private var tab: PillTab {
+        if let chosenTab, !pills(in: chosenTab).isEmpty { return chosenTab }
+        if !pills(in: .sessions).isEmpty { return .sessions }
+        return pills(in: .integrations).isEmpty ? .sessions : .integrations
+    }
+
+    /// An integration (GitHub, Vercel…) is in focus: no tabs, only integrations.
+    private var integrationFocused: Bool {
+        state.focusTask.map { Self.tab(of: $0) == .integrations } ?? false
+    }
+
+    /// With an integration in focus: one "Claude Code" pill standing for all sessions
+    /// (the most urgent one's Mochi and badge; a tap brings that session back), then the integrations.
+    /// Tabs only matter with several sessions; with 0 or 1 the card looks like before.
+    private var showTabs: Bool {
+        !integrationFocused && state.tasks.filter(\.isClaudeSession).count >= 2
+    }
 
     private var others: [AgentTask] {
-        state.tasks.filter { $0.id != state.focusId }
+        if showTabs { return pills(in: tab) }
+        guard integrationFocused else { return state.orderedOtherTasks }
+        var list = pills(in: .integrations)
+        if var claude = pills(in: .sessions).first {
+            claude.name = "Claude Code"
+            list.insert(claude, at: 0)
+        }
+        return list
     }
 
+    /// Fits in 4 slots: all of them, or the 3 most urgent plus a "+N" pill.
     private var displayTasks: [AgentTask] {
-        Array(others.prefix(4))
+        others.count <= Self.slots ? others : Array(others.prefix(Self.slots - 1))
     }
+
+    private var hiddenCount: Int { max(0, others.count - displayTasks.count) }
 
     private let columns = [
         GridItem(.flexible(), spacing: 4),
@@ -2202,21 +2274,135 @@ struct AgentPillsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(displayTasks) { task in
-                    AgentPill(task: task, state: state, swapping: $swapping) {
-                        swapping = true
-                        state.setFocus(task.id)
-                        SoundEngine.shared.play("blip")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { swapping = false }
+            if showTabs {
+                PillTabBar(
+                    current: tab,
+                    sessionCount: state.tasks.filter(\.isClaudeSession).count,
+                    sessionsAlert: needsAttention(.sessions),
+                    integrationsAlert: needsAttention(.integrations)
+                ) { selected in
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        chosenTab = selected
+                        showAll = false
+                    }
+                }
+                .padding(.top, 7)
+                .padding(.horizontal, 10)
+            }
+
+            Group {
+                if showAll && others.count > Self.slots {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(others) { pill($0) }
+                            MorePill(label: "Less") {
+                                withAnimation(.easeInOut(duration: 0.2)) { showAll = false }
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                    }
+                } else if others.isEmpty {
+                    Text(showTabs && tab == .sessions ? "No other session" : "No integration")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(Color(hex: "#4B4F57"))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(displayTasks) { pill($0) }
+                            if hiddenCount > 0 {
+                                MorePill(label: "+\(hiddenCount)") {
+                                    withAnimation(.easeInOut(duration: 0.2)) { showAll = true }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        Spacer(minLength: 0)
                     }
                 }
             }
-            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: others.count) { _, count in if count <= Self.slots { showAll = false } }
+    }
+
+    /// Orange dot on a tab: one of its pills waits for you or has an alert badge.
+    private func needsAttention(_ tab: PillTab) -> Bool {
+        pills(in: tab).contains { [.approval, .question, .error].contains($0.state) || $0.pillBadge != nil }
+    }
+
+    private func pill(_ task: AgentTask) -> some View {
+        AgentPill(task: task, state: state, swapping: $swapping) {
+            swapping = true
+            showAll = false
+            state.setFocus(task.id)
+            SoundEngine.shared.play("blip")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { swapping = false }
+        }
+    }
+}
+
+/// "Sessions 3 | Integrations" selector at the top of the pills card.
+private struct PillTabBar: View {
+    let current: AgentPillsView.PillTab
+    let sessionCount: Int
+    let sessionsAlert: Bool
+    let integrationsAlert: Bool
+    let onSelect: (AgentPillsView.PillTab) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            tabButton(.sessions, title: "Sessions", count: sessionCount, alert: sessionsAlert)
+            tabButton(.integrations, title: "Integrations", count: nil, alert: integrationsAlert)
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func tabButton(_ tab: AgentPillsView.PillTab, title: String, count: Int?, alert: Bool) -> some View {
+        let on = current == tab
+        return Button(action: { onSelect(tab) }) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Color(hex: on ? "#C5C8CD" : "#6B7079"))
+                }
+                if alert && !on {
+                    Circle().fill(Color(hex: "#F5A524")).frame(width: 5, height: 5)
+                }
+            }
+            .foregroundColor(Color(hex: on ? "#F5F6F8" : "#6B7079"))
+            .padding(.horizontal, 8)
+            .frame(height: 18)
+            .background(Capsule().fill(on ? Color(hex: "#1D1F23") : Color.clear))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// "+N" (more pills than slots) / "Less" pill, same shape as AgentPill.
+private struct MorePill: View {
+    let label: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(Color(hex: hovered ? "#C5C8CD" : "#8E939C"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 28)
+                .background(Capsule().fill(Color(hex: hovered ? "#1A1B1F" : "#0E0F11")))
+                .overlay(Capsule().stroke(Color.white.opacity(hovered ? 0.18 : 0.08), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 

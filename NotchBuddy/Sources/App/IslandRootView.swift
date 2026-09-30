@@ -554,7 +554,7 @@ struct CompactMiniGrid: View {
     @ObservedObject var state: AppState
 
     private var others: [AgentTask] {
-        Array(state.tasks.filter { $0.id != state.focusId }.prefix(4))
+        Array(state.orderedOtherTasks.prefix(4))   // most urgent first, like the pills
     }
 
     var body: some View {

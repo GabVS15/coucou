@@ -16,7 +16,7 @@ struct LiveSessionView: View {
                 HStack(alignment: .top, spacing: 0) {
                     LiveStepsColumn(state: state)
                         .frame(width: 128)
-                    LiveCodePanel(session: state.liveSession)
+                    LiveCodePanel(session: state.focusedLiveSession)
                         .padding(.vertical, 8)
                         .padding(.trailing, 8)
                 }
@@ -30,14 +30,14 @@ struct LiveSessionView: View {
 private struct LiveStepsColumn: View {
     @ObservedObject var state: AppState
 
-    private var task: AgentTask? { state.tasks.first { $0.id == "integration_claude" } }
+    private var task: AgentTask? { state.focusTask }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Space for Mochi (BotPlacement draws it above this column)
             Spacer().frame(height: 82)
 
-            Text(task?.name ?? "Claude Code")
+            Text(task?.projectName ?? task?.name ?? "Claude Code")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color(hex: "#F5F6F8"))
                 .lineLimit(1).truncationMode(.tail)
@@ -49,7 +49,7 @@ private struct LiveStepsColumn: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(LiveStepKind.allCases, id: \.self) { kind in
-                    LiveStepRow(kind: kind, status: state.liveSession.status(kind))
+                    LiveStepRow(kind: kind, status: state.focusedLiveSession.status(kind))
                 }
             }
             .padding(.top, 14)

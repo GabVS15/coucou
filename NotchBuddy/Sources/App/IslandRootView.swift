@@ -32,6 +32,10 @@ struct IslandContainer: View {
 
     private let openSpring = Animation.spring(response: 0.5, dampingFraction: 0.72)
     private let closeEase  = Animation.timingCurve(0.45, 0, 0.2, 1, duration: 0.34)
+    /// Views fade out quickly on close, like the prototype's .view (opacity .16s).
+    private let viewTransition = AnyTransition.asymmetric(
+        insertion: .opacity,
+        removal: .opacity.animation(.easeOut(duration: 0.16)))
 
     private var chatPromptHeight: CGFloat {
         let base: CGFloat = 240
@@ -59,7 +63,10 @@ struct IslandContainer: View {
                         cornerRadius: cornerRadius, topRadius: islandTopRadius)
                 .fill(Color.black)
 
-            // Content
+            // Content — wrapped in a persistent container clipped to the animated island shape,
+            // so views removed on close (frozen at their expanded width) can't spill outside
+            // while the island shrinks (prototype: .clip{overflow:hidden}).
+            ZStack(alignment: .topLeading) {
             if state.mode == .expanded {
                 if greetingActive {
                     // Greeting canvas: fixed 640-wide, centered by offset so x=320 aligns with island center
@@ -68,7 +75,7 @@ struct IslandContainer: View {
                         .offset(x: (islandWidth - IslandConst.expandedWidth) / 2)
                         .clipShape(IslandShape(width: islandWidth, height: islandHeight,
                                               cornerRadius: cornerRadius, topRadius: islandTopRadius))
-                        .transition(.opacity)
+                        .transition(viewTransition)
                 } else if uploadActive {
                     ZStack(alignment: .topLeading) {
                         UploadCanvasView(state: state)
@@ -81,16 +88,20 @@ struct IslandContainer: View {
                             .frame(width: islandWidth, height: 34)
                             .offset(y: 8)
                     }
-                    .transition(.opacity)
+                    .transition(viewTransition)
                 } else {
                     IslandContentView(state: state)
                         .frame(width: islandWidth, height: islandHeight - earOffset)
                         .offset(y: earOffset)
                         .clipShape(IslandShape(width: islandWidth, height: islandHeight,
                                               cornerRadius: cornerRadius, topRadius: islandTopRadius))
-                        .transition(.opacity)
+                        .transition(viewTransition)
                 }
             }
+            }
+            .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
+            .clipShape(IslandShape(width: islandWidth, height: islandHeight,
+                                  cornerRadius: cornerRadius, topRadius: islandTopRadius))
 
             // Single BotPlacement — always alive in the view tree so spring animations
             // fire from the current position (e.g. choose at 60,101) when canvas deactivates.

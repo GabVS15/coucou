@@ -355,6 +355,17 @@ final class IslandWindowController: NSWindowController {
             }
         }
 
+        // Click outside the island (another app, window or screen) closes it.
+        // Global monitors only see events sent to other apps, so clicks on the island never land here.
+        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state.collapseOnOutsideClick else { return }
+                if self.state.mode == .expanded && !self.state.isPinned {
+                    self.collapse()
+                }
+            }
+        }
+
         // Hook server expand requests (alerts only)
         NotificationCenter.default.addObserver(forName: .hookExpand, object: nil, queue: .main) { [weak self] note in
             guard let self, let view = note.object as? IslandView else { return }

@@ -95,6 +95,11 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(autoCloseInterval, forKey: "autoCloseInterval") }
     }
 
+    // Collapse the open island when the user clicks outside it — persisted
+    @Published var collapseOnOutsideClick: Bool = true {
+        didSet { UserDefaults.standard.set(collapseOnOutsideClick, forKey: "collapseOnOutsideClick") }
+    }
+
     // Absence interval — persisted
     var absenceInterval: TimeInterval = 3 * 60 {
         didSet { UserDefaults.standard.set(absenceInterval, forKey: "absenceInterval") }
@@ -191,6 +196,7 @@ final class AppState: ObservableObject {
         if let v = ud.object(forKey: "autoCloseInterval") as? Double {
             autoCloseInterval = (v == 60) ? 15 : v
         }
+        if let v = ud.object(forKey: "collapseOnOutsideClick") as? Bool { collapseOnOutsideClick = v }
         if let v = ud.object(forKey: "absenceInterval")   as? Double { absenceInterval   = v }
         if let v = ud.object(forKey: "greetThreshold")    as? Double { greetThresholdSeconds = v }
         if let v = ud.object(forKey: "hotkeyEnabled") as? Bool  { hotkeyEnabled = v }

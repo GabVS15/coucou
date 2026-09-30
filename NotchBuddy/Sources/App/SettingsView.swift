@@ -261,6 +261,7 @@ struct SettingsView: View {
                                 .frame(width: 64)
                             Text("s inactive")
                         }
+                        Toggle("Close when clicking outside the island", isOn: $state.collapseOnOutsideClick)
                         HStack(spacing: 8) {
                             Text("Hide after")
                             TextField("3", value: absenceMinutes, format: .number)

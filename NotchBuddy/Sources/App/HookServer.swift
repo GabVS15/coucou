@@ -109,7 +109,7 @@ final class HookServer: @unchecked Sendable {
 
     // MARK: - Event → AppState
     // All Claude Code events route to the permanent "integration_claude" task.
-    // View switches only happen if VS Code is the currently focused mochi.
+    // View switches only happen if Claude Code is the currently focused mochi.
     // When not focused: state updates animate the mini bot in the pill; badge shown for alerts.
 
     @MainActor
@@ -120,12 +120,9 @@ final class HookServer: @unchecked Sendable {
         let rawName = URL(fileURLWithPath: cwd).lastPathComponent
         let projectName = aliasProjectName(rawName.isEmpty ? "Session" : rawName)
 
-        let termProgram = payload["term_program"] as? String ?? ""
-        let bundleId    = payload["bundle_id"]    as? String ?? ""
-        let isVSCode = termProgram.lowercased().contains("vscode") ||
-                       bundleId.lowercased().contains("vscode")
-        guard isVSCode else {
-            nbLog("Ignored \(name) from \(termProgram.isEmpty ? bundleId : termProgram) (\(projectName))")
+        // VS Code, Claude Desktop and terminals; headless runs (claude -p, SDK scripts) are ignored
+        guard let source = ClaudeSource.detect(payload) else {
+            nbLog("Ignored \(name) (\(Self.sourceFields(payload)))")
             return
         }
 
@@ -141,14 +138,14 @@ final class HookServer: @unchecked Sendable {
 
         case "SessionStart":
             activeSessionId = sessionId
-            upsertTask(projectName: projectName, cwd: cwd)
-            nbLog("SessionStart \(projectName) (\(sessionId.prefix(8)))")
+            upsertTask(projectName: projectName, cwd: cwd, source: source)
+            nbLog("SessionStart \(projectName) (\(sessionId.prefix(8))) from \(source.label) (\(Self.sourceFields(payload)))")
             if state.isPresent { expandIfNeeded(to: .overview) }
             SoundEngine.shared.play("work")
 
         case "UserPromptSubmit":
             activeSessionId = sessionId
-            upsertTask(projectName: projectName, cwd: cwd)
+            upsertTask(projectName: projectName, cwd: cwd, source: source)
             state.updateTask(id: "integration_claude", state: .thinking)
             if let prompt = payload["prompt"] as? String, !prompt.isEmpty {
                 appendStep(id: "integration_claude", step: String(prompt.prefix(60)))
@@ -157,7 +154,7 @@ final class HookServer: @unchecked Sendable {
 
         case "PreToolUse":
             activeSessionId = sessionId
-            upsertTask(projectName: projectName, cwd: cwd)
+            upsertTask(projectName: projectName, cwd: cwd, source: source)
             state.updateTask(id: "integration_claude", state: .working)
             let tool = payload["tool_name"] as? String ?? "Tool"
             let input = payload["tool_input"] as? [String: Any] ?? [:]
@@ -261,11 +258,7 @@ final class HookServer: @unchecked Sendable {
         let rawName   = URL(fileURLWithPath: cwd).lastPathComponent
         let projectName = aliasProjectName(rawName.isEmpty ? "Session" : rawName)
 
-        let termProgram = payload["term_program"] as? String ?? ""
-        let bundleId    = payload["bundle_id"]    as? String ?? ""
-        let isVSCode = termProgram.lowercased().contains("vscode") ||
-                       bundleId.lowercased().contains("vscode")
-        guard isVSCode else {
+        guard let source = ClaudeSource.detect(payload) else {
             Task.detached { [weak self] in
                 self?.sendLine(fd: fd, text: #"{"permissionDecision":"ask"}"#)
                 close(fd)
@@ -291,7 +284,7 @@ final class HookServer: @unchecked Sendable {
         pendingApprovalFD = fd
         activeSessionId = sessionId
 
-        upsertTask(projectName: projectName, cwd: cwd)
+        upsertTask(projectName: projectName, cwd: cwd, source: source)
         state.updateTask(id: "integration_claude", state: .approval)
         state.pendingApproval = ApprovalInfo(sessionId: sessionId, tool: tool, command: command)
         state.isPinned = true
@@ -340,11 +333,19 @@ final class HookServer: @unchecked Sendable {
 
     /// Updates integration_claude with the current session project name and cwd.
     @MainActor
-    private func upsertTask(projectName: String, cwd: String = "") {
+    private func upsertTask(projectName: String, cwd: String = "", source: ClaudeSource) {
         let state = AppState.shared
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_claude" }) else { return }
         state.tasks[idx].name = projectName
+        state.tasks[idx].claudeSource = source
         if !cwd.isEmpty { state.tasks[idx].sessionCwd = cwd }
+    }
+
+    /// Where the event came from, for the log (no command or code).
+    private static func sourceFields(_ payload: [String: Any]) -> String {
+        ["entrypoint", "term_program", "bundle_id"]
+            .map { "\($0)=\(payload[$0] as? String ?? "")" }
+            .joined(separator: " ")
     }
 
     // MARK: - Badge helpers
@@ -370,7 +371,7 @@ final class HookServer: @unchecked Sendable {
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_claude" }) else { return }
         state.tasks[idx].steps = []
         state.tasks[idx].stepIndex = 0
-        state.tasks[idx].name = "VS Code"
+        state.tasks[idx].name = "Claude Code"
         state.tasks[idx].pillBadge = nil
     }
 
@@ -712,6 +713,7 @@ def main():
     payload.setdefault('iterm_session_id', env.get('ITERM_SESSION_ID', ''))
     payload.setdefault('term_session_id', env.get('TERM_SESSION_ID', ''))
     payload.setdefault('bundle_id', env.get('__CFBundleIdentifier', ''))
+    payload.setdefault('entrypoint', env.get('CLAUDE_CODE_ENTRYPOINT', ''))
     if 'cwd' not in payload or not payload['cwd']:
         payload['cwd'] = os.getcwd()
 
@@ -803,6 +805,7 @@ def main():
     payload.setdefault('iterm_session_id', env.get('ITERM_SESSION_ID', ''))
     payload.setdefault('term_session_id', env.get('TERM_SESSION_ID', ''))
     payload.setdefault('bundle_id', env.get('__CFBundleIdentifier', ''))
+    payload.setdefault('entrypoint', env.get('CLAUDE_CODE_ENTRYPOINT', ''))
     if 'cwd' not in payload or not payload['cwd']:
         payload['cwd'] = os.getcwd()
 

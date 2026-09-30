@@ -41,7 +41,7 @@ private struct LiveStepsColumn: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(Color(hex: "#F5F6F8"))
                 .lineLimit(1).truncationMode(.tail)
-            Text("Claude Code")
+            Text(task?.claudeSource.map { "Claude Code · \($0.label)" } ?? "Claude Code")
                 .font(.system(size: 11.5))
                 .foregroundColor(Color(hex: "#8E939C"))
                 .lineLimit(1)

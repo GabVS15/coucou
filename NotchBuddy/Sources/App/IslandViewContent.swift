@@ -138,12 +138,7 @@ struct OverviewView: View {
         guard let task else { return }
         switch task.id {
         case "integration_claude":
-            let vscodeBundleId = "com.microsoft.VSCode"
-            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == vscodeBundleId }) {
-                app.activate(options: .activateIgnoringOtherApps)
-            } else {
-                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Visual Studio Code.app"))
-            }
+            (task.claudeSource ?? .vscode).open(cwd: task.sessionCwd)
         case "integration_resend":
             NSWorkspace.shared.open(URL(string: "https://resend.com/emails")!)
         case "integration_vercel":
@@ -1098,7 +1093,7 @@ struct IntegrationCardView: View {
                         .foregroundColor(Color(hex: "#F5F6F8"))
                         .lineLimit(1).truncationMode(.tail)
                         .layoutPriority(1)
-                    Text("Claude Code")
+                    Text(task.claudeSource.map { "Claude Code · \($0.label)" } ?? "Claude Code")
                         .font(.system(size: 11))
                         .foregroundColor(Color(hex: "#8E939C"))
                         .lineLimit(1).truncationMode(.tail)
@@ -1129,7 +1124,7 @@ struct IntegrationCardView: View {
                     Circle()
                         .fill(Color(hex: task.color))
                         .frame(width: 7, height: 7)
-                    Text(task.id == "integration_claude" ? "VS Code" : task.name)
+                    Text(task.id == "integration_claude" ? "Claude Code" : task.name)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(Color(hex: "#F5F6F8"))
                     Text("Integration")
@@ -1160,7 +1155,9 @@ struct IntegrationCardView: View {
 
                 HStack(spacing: 8) {
                     if task.id == "integration_claude" {
-                        Button("Open Visual Studio Code") { openVSCode() }
+                        Button("Open \(task.claudeSource?.appName ?? "VS Code")") {
+                            (task.claudeSource ?? .vscode).open(cwd: task.sessionCwd)
+                        }
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(Color(hex: task.color).opacity(0.7))
                             .buttonStyle(.plain)
@@ -1228,33 +1225,6 @@ struct IntegrationCardView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.top, 4)
             .transition(.opacity)
-        }
-    }
-
-    private func openVSCode() {
-        let ids = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium.codium"]
-        let appURL = ids.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }.first
-
-        // If we have a project folder, open it directly in VS Code
-        if let cwd = task.sessionCwd, !cwd.isEmpty, let appURL = appURL {
-            NSWorkspace.shared.open(
-                [URL(fileURLWithPath: cwd)],
-                withApplicationAt: appURL,
-                configuration: .init(),
-                completionHandler: nil
-            )
-            return
-        }
-
-        // No cwd: activate running instance or launch fresh
-        if let running = ids.compactMap({ id in
-            NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == id }
-        }).first {
-            running.activate(options: .activateIgnoringOtherApps)
-            return
-        }
-        if let appURL = appURL {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: .init(), completionHandler: nil)
         }
     }
 }
@@ -2257,9 +2227,9 @@ struct AgentPill: View {
     let onTap: () -> Void
     @State private var isHovered = false
 
-    // VS Code pill always shows "VS Code" label regardless of active project name
+    // Claude Code pill always shows "Claude Code" regardless of the active project name
     private var displayName: String {
-        task.id == "integration_claude" ? "VS Code" : task.name
+        task.id == "integration_claude" ? "Claude Code" : task.name
     }
 
     var body: some View {

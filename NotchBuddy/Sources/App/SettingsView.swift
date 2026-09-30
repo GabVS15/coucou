@@ -278,7 +278,7 @@ struct SettingsView: View {
                 GroupBox("Active pills") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("VS Code")
+                            Text("Claude Code")
                                 .font(.system(size: 12, weight: .semibold))
                             Circle().fill(Color(hex: "#F5F6F8")).frame(width: 8, height: 8)
                             Spacer()

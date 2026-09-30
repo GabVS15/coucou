@@ -173,6 +173,8 @@ final class HookServer: @unchecked Sendable {
         let id = state.upsertClaudeSession(sessionId: sessionId, projectName: projectName, cwd: cwd, source: source)
         lastEventAt[id] = Date()
         let focused = state.focusId == id
+        DayJournal.shared.record(event: name, sessionId: sessionId, project: projectName,
+                                 tool: payload["tool_name"] as? String)
 
         // The session moved on (answered in its own app, or Claude acts again): its question is gone.
         // Other events (Notification right after Stop, subagents…) leave it on screen.
@@ -512,6 +514,7 @@ final class HookServer: @unchecked Sendable {
         let state = AppState.shared
         guard let index = state.approvalQueue.firstIndex(where: { $0.id == requestId }) else { return }
         let request = state.approvalQueue.remove(at: index)
+        if decision != "ask" { DayJournal.shared.recordApproval() }   // "ask" = handed back to the terminal
 
         let json: String
         switch decision {

@@ -66,6 +66,7 @@ final class UsageMonitor {
         guard let current = limits.current() else { return }
 
         lastSeen = current.updatedAt
+        if let pct = current.fiveHour?.usedPercentage { DayJournal.shared.recordUsage(pct) }
         let state = AppState.shared
         // Same numbers every few seconds while a session is open: only publish and save real changes
         guard state.usage?.fiveHour != current.fiveHour || state.usage?.sevenDay != current.sevenDay else { return }

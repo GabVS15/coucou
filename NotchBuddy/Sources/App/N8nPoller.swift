@@ -231,6 +231,7 @@ final class N8nPoller: @unchecked Sendable {
 
         // Apply workflow filter (empty = all workflows)
         if !state.n8nWorkflowFilter.isEmpty && !state.n8nWorkflowFilter.contains(name) { return }
+        if !success { DayJournal.shared.recordN8nError() }
 
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_n8n" }) else { return }
         let focused = state.focusId == "integration_n8n"

@@ -274,6 +274,15 @@ struct SettingsView: View {
                         Toggle("Show live Claude Code session (file diff and terminal)", isOn: $state.liveSessionEnabled)
                         Toggle("Quick replies when Claude ends on a question (waits up to 45 s)", isOn: $state.quickRepliesEnabled)
                         HStack(spacing: 8) {
+                            Toggle("Evening recap at", isOn: $state.recapEnabled)
+                            Picker("", selection: $state.recapHour) {
+                                ForEach(15..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
+                            }
+                            .labelsHidden()
+                            .frame(width: 90)
+                            .disabled(!state.recapEnabled)
+                        }
+                        HStack(spacing: 8) {
                             Text("Hide after")
                             TextField("3", value: absenceMinutes, format: .number)
                                 .textFieldStyle(.roundedBorder)

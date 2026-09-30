@@ -227,6 +227,20 @@ final class AppState: ObservableObject {
     // Closing question waiting for a quick reply, per session task (Stop hook held open)
     @Published var quickReplies: [String: QuickReplyPrompt] = [:]
 
+    // Evening recap — persisted. Changing either reschedules the one recap timer.
+    @Published var recapEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(recapEnabled, forKey: "recapEnabled")
+            DayJournal.shared.scheduleRecap()
+        }
+    }
+    @Published var recapHour: Int = 19 {
+        didSet {
+            UserDefaults.standard.set(recapHour, forKey: "recapHour")
+            DayJournal.shared.scheduleRecap()
+        }
+    }
+
     // Claude Code plan usage from the status line relay (nil: unknown, or every window has reset)
     @Published var usage: UsageLimits? = nil
 
@@ -248,6 +262,8 @@ final class AppState: ObservableObject {
         if let v = ud.object(forKey: "collapseOnOutsideClick") as? Bool { collapseOnOutsideClick = v }
         if let v = ud.object(forKey: "liveSessionEnabled") as? Bool { liveSessionEnabled = v }
         if let v = ud.object(forKey: "quickRepliesEnabled") as? Bool { quickRepliesEnabled = v }
+        if let v = ud.object(forKey: "recapEnabled") as? Bool { recapEnabled = v }
+        if let v = ud.object(forKey: "recapHour") as? Int { recapHour = min(23, max(0, v)) }
         if let v = ud.string(forKey: "chatMode"), let mode = ChatMode(rawValue: v) { chatMode = mode }
         codeProject = ud.string(forKey: "codeProject")
         ChatStore.load(into: self)

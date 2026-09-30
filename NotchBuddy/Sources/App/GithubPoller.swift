@@ -255,6 +255,7 @@ enum GitHubReactions {
 
     static func play(_ e: Events) {
         let state = AppState.shared
+        DayJournal.shared.recordGitHub(merged: e.merged.count, ciFailed: e.ciFailed.count)
         guard let idx = state.tasks.firstIndex(where: { $0.id == "integration_github" }) else { return }
         let focused = state.focusId == "integration_github"
 

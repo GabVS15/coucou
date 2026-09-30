@@ -27,6 +27,7 @@ struct IslandViewContent: View {
         case .greeting:  EmptyView()  // GreetingCanvasView overlaid in IslandRootView
         case .liveSession: LiveSessionView(state: state)
         case .github:      GitHubDetailView(state: state)
+        case .recap:       RecapView(state: state)
         }
     }
 }
@@ -354,6 +355,78 @@ struct FinishedView: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+// MARK: - Evening recap
+
+struct RecapView: View {
+    @ObservedObject var state: AppState
+    @State private var copied = false
+
+    var body: some View {
+        let recap = DayRecap(log: DayJournal.shared.today, state: state)
+        ZStack {
+            CardBackground(wash: .indigo)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Your day")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(recap.subtitle.isEmpty ? "A quiet one." : recap.subtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "#9398A1"))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    SecondaryButton(copied ? "Copied" : "Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(recap.text, forType: .string)
+                        copied = true
+                    }
+                    PrimaryButton("OK") {
+                        NotificationCenter.default.post(name: .islandCollapse, object: nil)
+                    }
+                }
+                if recap.tiles.isEmpty {
+                    Text("Nothing ran today. Tomorrow's another day.")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color(hex: "#9398A1"))
+                } else {
+                    HStack(spacing: 6) {
+                        ForEach(recap.tiles) { RecapTileView(tile: $0) }
+                    }
+                }
+            }
+            .padding(.leading, 108)
+            .padding(.trailing, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct RecapTileView: View {
+    let tile: RecapTile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(tile.value)
+                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                .foregroundColor(Color(hex: tile.color))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(tile.label)
+                .font(.system(size: 10.5))
+                .foregroundColor(Color(hex: "#8E939C"))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color(hex: tile.color).opacity(0.08))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: tile.color).opacity(0.18), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

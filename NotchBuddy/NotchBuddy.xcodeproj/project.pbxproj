@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01CA3150B3B6BAE4BC717B56 /* DayJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20AACFC35A7FF60CDEB8606 /* DayJournal.swift */; };
 		0329E76BA4A8FEEA8A6D76E7 /* ClaudeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D5410BD030B243ADDCFF4 /* ClaudeService.swift */; };
 		065FCE817315454DE3F85F25 /* IslandViewContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA02B08886939FF6FE0475DD /* IslandViewContent.swift */; };
 		06BF5FD95E03010CAFDBF2D0 /* NotchBuddyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1BD8F3CAA60CF37640759E1 /* NotchBuddyApp.swift */; };
@@ -29,6 +30,7 @@
 		2DEB459FBD0BA3CEAAA5FDE9 /* ClaudeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D5410BD030B243ADDCFF4 /* ClaudeService.swift */; };
 		2F36E3C6C073E968A682AFA4 /* NotionPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE03E03D1804B0B92C5C2DAD /* NotionPoller.swift */; };
 		311FECAC69C0F41CF016D730 /* QuickReplies.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE048DA1CD7BCCB769B8B5CC /* QuickReplies.swift */; };
+		33715387046F332ADA385B32 /* DayJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20AACFC35A7FF60CDEB8606 /* DayJournal.swift */; };
 		3756B7E1A55D9CEC8C4D34A4 /* IslandStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8212018F09EA1E96FBD63CD /* IslandStateMachine.swift */; };
 		3F19756A396F125EC711247F /* IslandTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D3CE3617E9D336DDBA10F7A /* IslandTypes.swift */; };
 		4117E7C8AA231AAE36E7509D /* UploadCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B241B043223AFBBFB7418A5E /* UploadCanvasView.swift */; };
@@ -117,6 +119,7 @@
 		E4B83BC8E941B8C2B7CD09A4 /* LiveSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionView.swift; sourceTree = "<group>"; };
 		E91B733ADC638E14E9BB6EFA /* WindowContextCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContextCapture.swift; sourceTree = "<group>"; };
 		F1BD8F3CAA60CF37640759E1 /* NotchBuddyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchBuddyApp.swift; sourceTree = "<group>"; };
+		F20AACFC35A7FF60CDEB8606 /* DayJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayJournal.swift; sourceTree = "<group>"; };
 		FA02B08886939FF6FE0475DD /* IslandViewContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandViewContent.swift; sourceTree = "<group>"; };
 		FE048DA1CD7BCCB769B8B5CC /* QuickReplies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickReplies.swift; sourceTree = "<group>"; };
 		FFD4DC70ACDB12740C627D8A /* LiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSession.swift; sourceTree = "<group>"; };
@@ -135,6 +138,7 @@
 				A83D5410BD030B243ADDCFF4 /* ClaudeService.swift */,
 				07BB613D3CA842BAE9911FD8 /* ClaudeSessions.swift */,
 				0EC8B98E31D3335AE50E97AE /* ClaudeSource.swift */,
+				F20AACFC35A7FF60CDEB8606 /* DayJournal.swift */,
 				3232F258523DD8D09B670363 /* FileDropView.swift */,
 				8CB8B6E5E9DA6164F979E88F /* GithubPoller.swift */,
 				73FDE6484CB9C294A2D25796 /* GitHubViews.swift */,
@@ -311,6 +315,7 @@
 				2DEB459FBD0BA3CEAAA5FDE9 /* ClaudeService.swift in Sources */,
 				91CF5833199C490B4631A9D7 /* ClaudeSessions.swift in Sources */,
 				E06479112F94AA6C14C94E34 /* ClaudeSource.swift in Sources */,
+				33715387046F332ADA385B32 /* DayJournal.swift in Sources */,
 				E776C7D1DE5C62EA8D4BA3E3 /* FileDropView.swift in Sources */,
 				CD2EC04CC76B21D66599F4CD /* GitHubViews.swift in Sources */,
 				C808B654C84D9F71DBF8493A /* GithubPoller.swift in Sources */,
@@ -352,6 +357,7 @@
 				0329E76BA4A8FEEA8A6D76E7 /* ClaudeService.swift in Sources */,
 				A216A40F40AF9E75B86DD7BC /* ClaudeSessions.swift in Sources */,
 				ADF111CF0A022112316BE59C /* ClaudeSource.swift in Sources */,
+				01CA3150B3B6BAE4BC717B56 /* DayJournal.swift in Sources */,
 				2132477000FD77F7EB234DAA /* FileDropView.swift in Sources */,
 				27B1FFEFA6E60A953EF64BF0 /* GitHubViews.swift in Sources */,
 				C18227D148D99FE6EE3CC51A /* GithubPoller.swift in Sources */,

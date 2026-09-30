@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "Open Coucou", action: #selector(openIsland), keyEquivalent: "")
+        menu.addItem(withTitle: "Today's Recap", action: #selector(openRecap), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
@@ -40,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openIsland() {
         islandController?.expand(to: .overview)
+    }
+
+    @objc private func openRecap() {
+        DayJournal.shared.showRecap()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DayJournal.shared.flush()
     }
 
     private var settingsWindow: NSWindow?
@@ -65,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         islandController?.fsm.launch()
         HookServer.shared.start()
         UsageMonitor.shared.start()
+        DayJournal.shared.start()
         N8nPoller.shared.start()
         VercelPoller.shared.start()
         ResendPoller.shared.start()

@@ -33,7 +33,8 @@ enum QuickReplySuggester {
         guard question.hasSuffix("?") else { return nil }
 
         let french = looksFrench(message)
-        if let listed = listedOptions(Array(lines.dropLast().suffix(8))), listed.count >= 2 {
+        // A list above the question only holds the options when the question asks to pick one
+        if asksToChoose(question), let listed = listedOptions(Array(lines.dropLast().suffix(8))), listed.count >= 2 {
             return (question, Array(listed.prefix(2)))
         }
         if let pair = eitherOr(question) {
@@ -55,6 +56,15 @@ enum QuickReplySuggester {
             options.insert(label(String(line[r])), at: 0)
         }
         return options.filter { !$0.isEmpty }
+    }
+
+    /// "Which one?" / "Tu préfères laquelle ?" — not "Je commence par l'étape 0 ?".
+    private static func asksToChoose(_ question: String) -> Bool {
+        let q = " " + question.lowercased() + " "
+        let hints = [" lequel", " laquelle", " lesquel", " quel ", " quelle ", " quelles ", " quels ",
+                     "préfère", "choisi", " option", " ou ",
+                     " which", " prefer", " choose", " pick", " or "]
+        return hints.contains { q.contains($0) }
     }
 
     /// "Tabs or two rows?" / "Onglets ou lignes ?" with short sides → both sides.

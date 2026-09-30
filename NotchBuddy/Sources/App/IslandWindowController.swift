@@ -335,8 +335,8 @@ final class IslandWindowController: NSWindowController {
     func collapse() {
         state.isPinned = false
         finishedPinTimer?.cancel()
-        // Tell FSM we're going to compact (from home)
-        if fsm.state == .home { fsm.mouseLeft() }
+        // Move the FSM to petit now, otherwise it stays in home and ignores the next click
+        fsm.collapse()
         setMode(.compact)
         window?.resignKey()
     }

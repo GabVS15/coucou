@@ -72,6 +72,14 @@ final class IslandStateMachine {
         }
     }
 
+    /// Explicit close (Escape, outside click, OK button): expanded → petit right away,
+    /// so the next click on the compact island opens it again.
+    func collapse() {
+        guard state == .home || state == .coucou else { return }
+        cancelTimers()
+        transition(to: .petit)
+    }
+
     /// Compact island clicked
     func click() {
         guard state == .petit else { return }

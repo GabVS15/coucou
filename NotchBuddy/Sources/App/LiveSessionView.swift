@@ -177,6 +177,8 @@ private struct LiveCodePanel: View {
             if let terminal = session.terminal { LiveTerminalView(terminal: terminal) }
         case .answer:
             if let answer = session.answer { LiveAnswerView(lines: answer) }
+        case .summary:
+            LiveSummaryView(session: session)
         }
     }
 }
@@ -219,21 +221,28 @@ private struct LiveAnswerView: View {
 private struct LiveFileTab: View {
     let file: LiveFile
     let cwd: String
+    var onBack: (() -> Void)? = nil   // summary: back to the file list
+    var openLine: Int? = nil          // summary: ↗ opens the file in VS Code at this line
 
     private var fileName: String {
         let name = (file.path as NSString).lastPathComponent
         return name.isEmpty ? "untitled" : name
     }
 
-    /// Path relative to the project folder when the file lives inside it.
-    private var displayPath: String {
-        let root = cwd.hasSuffix("/") ? cwd : cwd + "/"
-        if !cwd.isEmpty, file.path.hasPrefix(root) { return String(file.path.dropFirst(root.count)) }
-        return (file.path as NSString).abbreviatingWithTildeInPath
-    }
+    private var displayPath: String { liveDisplayPath(file.path, cwd: cwd) }
 
     var body: some View {
         HStack(spacing: 7) {
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Color(hex: "#8E939C"))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             HStack(spacing: 6) {
                 LanguageBadge(fileName: fileName)
                 Text(fileName)
@@ -256,6 +265,9 @@ private struct LiveFileTab: View {
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundColor(Color(hex: "#5F646D"))
                 .lineLimit(1).truncationMode(.head)
+            if let openLine {
+                OpenInVSCodeButton(path: file.path, line: openLine)
+            }
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
@@ -435,4 +447,228 @@ private struct LiveTerminalView: View {
             .onChange(of: terminal) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
         }
     }
+}
+
+// MARK: - Turn summary (top panel once the turn is done)
+
+/// Files changed with +/−, commands run with their result, tests, duration.
+/// A single changed file shows its diff right away; with several, a click opens one.
+private struct LiveSummaryView: View {
+    let session: LiveSession
+    @State private var selected: String? = nil
+
+    private var shownChange: LiveFileChange? {
+        if session.changes.count == 1 { return session.changes[0] }
+        return session.changes.first { $0.path == selected }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LiveSummaryHeader(session: session)
+            Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1)
+            if let change = shownChange {
+                LiveFileTab(file: change.file, cwd: session.cwd,
+                            onBack: session.changes.count > 1 ? { withAnimation(.easeInOut(duration: 0.2)) { selected = nil } } : nil,
+                            openLine: change.firstLine ?? 1)
+                LiveCodeLines(file: change.file)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(session.changes) { change in
+                            LiveChangeRow(change: change, cwd: session.cwd) {
+                                withAnimation(.easeInOut(duration: 0.2)) { selected = change.path }
+                            }
+                        }
+                        if !session.changes.isEmpty && !session.commands.isEmpty {
+                            Spacer().frame(height: 6)
+                        }
+                        LiveCommandRows(commands: session.commands)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .onChange(of: session.turnStart) { _, _ in selected = nil }
+    }
+}
+
+private struct LiveSummaryHeader: View {
+    let session: LiveSession
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(filesLabel)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(Color(hex: "#E8E9EC"))
+            if !session.changes.isEmpty {
+                LiveDiffCounts(added: session.totalAdded, removed: session.totalRemoved)
+            }
+            if let failed = session.testsFailed {
+                HStack(spacing: 4) {
+                    Image(systemName: failed ? "xmark.circle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                    Text(failed ? "Tests failed" : "Tests passed")
+                        .font(.system(size: 10.5, weight: .semibold))
+                }
+                .foregroundColor(Color(hex: failed ? "#F4505E" : "#34D399"))
+            }
+            Spacer(minLength: 4)
+            if let d = session.duration {
+                Label(Self.format(d), systemImage: "clock")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundColor(Color(hex: "#6B7079"))
+                    .labelStyle(.titleAndIcon)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+    }
+
+    private var filesLabel: String {
+        switch session.changes.count {
+        case 0: return "No file changed"
+        case 1: return "1 file changed"
+        case let n: return "\(n) files changed"
+        }
+    }
+
+    static func format(_ t: TimeInterval) -> String {
+        let s = Int(t.rounded())
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m \(String(format: "%02d", s % 60))s" }
+        return "\(s / 3600)h \(String(format: "%02d", (s % 3600) / 60))m"
+    }
+}
+
+private struct LiveDiffCounts: View {
+    let added: Int
+    let removed: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text("+\(added)").foregroundColor(Color(hex: "#34D399"))
+            Text("−\(removed)").foregroundColor(Color(hex: "#F4505E"))
+        }
+        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+        .fixedSize()
+    }
+}
+
+private struct LiveChangeRow: View {
+    let change: LiveFileChange
+    let cwd: String
+    let onSelect: () -> Void
+    @State private var hovered = false
+
+    private var name: String { (change.path as NSString).lastPathComponent }
+    private var folder: String {
+        let dir = (liveDisplayPath(change.path, cwd: cwd) as NSString).deletingLastPathComponent
+        return dir.isEmpty ? "" : dir + "/"
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button(action: onSelect) {
+                HStack(spacing: 7) {
+                    LanguageBadge(fileName: name)
+                    Text(name)
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color(hex: "#E8E9EC"))
+                        .lineLimit(1).truncationMode(.middle)
+                        .layoutPriority(1)
+                    if change.isNew {
+                        Text("new")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(Color(hex: "#34D399"))
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color(hex: "#34D399").opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    Text(folder)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundColor(Color(hex: "#5F646D"))
+                        .lineLimit(1).truncationMode(.head)
+                    Spacer(minLength: 6)
+                    LiveDiffCounts(added: change.added, removed: change.removed)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            OpenInVSCodeButton(path: change.path, line: change.firstLine ?? 1)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 24)
+        .background(hovered ? Color.white.opacity(0.05) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct LiveCommandRows: View {
+    let commands: [LiveCommand]
+
+    var body: some View {
+        ForEach(commands) { cmd in
+            HStack(spacing: 7) {
+                Group {
+                    switch cmd.failed {
+                    case .none:        LiveSpinner()
+                    case .some(true):  Image(systemName: "xmark.circle.fill").foregroundColor(Color(hex: "#F4505E"))
+                    case .some(false): Image(systemName: "checkmark.circle.fill").foregroundColor(Color(hex: "#34D399"))
+                    }
+                }
+                .font(.system(size: 11))
+                .frame(width: 16)
+                Text("$ " + cmd.command)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(hex: "#C5C8CD"))
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 6)
+                if cmd.isTest, let failed = cmd.failed {
+                    Text(failed ? "Tests failed" : "Tests passed")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Color(hex: failed ? "#F4505E" : "#34D399"))
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 21)
+        }
+    }
+}
+
+/// ↗ — opens the file in VS Code at the given line (vscode:// URL, works in the sandbox too).
+private struct OpenInVSCodeButton: View {
+    let path: String
+    let line: Int
+
+    var body: some View {
+        Button(action: open) {
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(Color(hex: "#8E939C"))
+                .frame(width: 18, height: 18)
+                .background(Color.white.opacity(0.07))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Open in VS Code")
+    }
+
+    private func open() {
+        var components = URLComponents()
+        components.scheme = "vscode"
+        components.host = "file"
+        components.path = path + ":\(max(1, line))"
+        if let url = components.url, NSWorkspace.shared.open(url) { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+}
+
+/// Path relative to the project folder when the file lives inside it, else ~-abbreviated.
+private func liveDisplayPath(_ path: String, cwd: String) -> String {
+    let root = cwd.hasSuffix("/") ? cwd : cwd + "/"
+    if !cwd.isEmpty, path.hasPrefix(root) { return String(path.dropFirst(root.count)) }
+    return (path as NSString).abbreviatingWithTildeInPath
 }

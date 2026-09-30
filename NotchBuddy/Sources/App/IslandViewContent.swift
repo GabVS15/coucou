@@ -766,7 +766,9 @@ struct PromptView: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            CardBackground(wash: .indigo)
+            ChatBackground(mood: messages.last?.role == .error ? .error : (codeMode ? .code : .question),
+                           busy: busy,
+                           pulse: messages.count)
 
             VStack(alignment: .leading, spacing: 6) {
                 ChatTopBar(state: state).padding(.top, 4)
@@ -784,8 +786,11 @@ struct PromptView: View {
                                         .id("typing")
                                 }
                             }
-                            .padding(.vertical, 2)
+                            // Room to scroll out of the faded edges
+                            .padding(.vertical, ChatFade.edge)
                         }
+                        .mask(ChatFade())
+                        .padding(.vertical, -ChatFade.edge + 2)
                         .onChange(of: messages.count) { _, _ in scrollToEnd(proxy) }
                         .onChange(of: messages.last?.content) { _, _ in scrollToEnd(proxy, animated: false) }
                         .onChange(of: busy) { _, _ in scrollToEnd(proxy) }
@@ -864,6 +869,118 @@ struct PromptView: View {
             await ClaudeService.shared.chat(query: query, context: state.promptContext, state: state)
             await MainActor.run { focused = true }
         }
+    }
+}
+
+/// Messages fade out under the top bar and above the field instead of being cut off.
+struct ChatFade: View {
+    static let edge: CGFloat = 12
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.edge)
+            Rectangle().fill(.black)
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.edge)
+        }
+    }
+}
+
+/// Chat card background: a slow mesh gradient glowing up from the bottom edge.
+/// Indigo for Question, Claude coral for Claude Code, red after an error. It moves faster and
+/// glows brighter while Claude works, and flashes softly when a message lands.
+/// Only drawn while the chat is on screen; still when Reduce Motion is on.
+struct ChatBackground: View {
+    enum Mood { case question, code, error }
+
+    let mood: Mood
+    let busy: Bool
+    let pulse: Int   // changes on each new message
+
+    // Every change is eased over time inside the timeline (a frame-by-frame view can't use .animation)
+    @State private var previousMood: Mood? = nil
+    @State private var moodChangedAt = Date.distantPast
+    @State private var busyChangedAt = Date.distantPast
+    @State private var busyTime: Double = 0       // seconds spent busy before the current stretch
+    @State private var busySince: Date? = nil
+    @State private var flashAt = Date.distantPast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let base = Color(hex: "#141518")
+    private static let calmSpeed = 0.3, busySpeed = 0.9
+
+    private static func palette(_ mood: Mood) -> [Color] {
+        switch mood {
+        case .question: return [Color(hex: "#6366F1"), Color(hex: "#8B5CF6"), Color(hex: "#38BDF8")]
+        case .code:     return [Color(hex: "#D97757"), Color(hex: "#F2A65A"), Color(hex: "#E0607E")]
+        case .error:    return [Color(hex: "#F4505E"), Color(hex: "#F97316"), Color(hex: "#BE123C")]
+        }
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 20)
+        TimelineView(.animation(minimumInterval: busy ? 1.0 / 30 : 1.0 / 15, paused: reduceMotion)) { context in
+            mesh(at: context.date)
+        }
+        .background(Self.base)
+        .clipShape(shape)
+        .overlay(shape.stroke(Color.white.opacity(0.04), lineWidth: 1))
+        .onChange(of: mood) { old, _ in
+            previousMood = old
+            moodChangedAt = Date()
+        }
+        .onChange(of: busy) { _, now in
+            let date = Date()
+            if now {
+                busySince = date
+            } else if let since = busySince {
+                busyTime += date.timeIntervalSince(since)
+                busySince = nil
+            }
+            busyChangedAt = date
+        }
+        .onChange(of: pulse) { _, _ in flashAt = Date() }
+    }
+
+    /// 0 → 1 over `duration` after `start`, eased.
+    private func ease(since start: Date, _ now: Date, duration: Double) -> Double {
+        if reduceMotion { return 1 }
+        let x = min(1, max(0, now.timeIntervalSince(start) / duration))
+        return x * x * (3 - 2 * x)
+    }
+
+    private func mesh(at now: Date) -> some View {
+        let t = now.timeIntervalSinceReferenceDate
+        // Motion phase: calm speed always, plus the extra speed only for the time spent busy (no jumps)
+        let busyStretch = busySince.map { now.timeIntervalSince($0) } ?? 0
+        let phase = reduceMotion ? 0 : t * Self.calmSpeed + (busyTime + busyStretch) * (Self.busySpeed - Self.calmSpeed)
+
+        let busyLevel = busy ? ease(since: busyChangedAt, now, duration: 0.6) : 1 - ease(since: busyChangedAt, now, duration: 0.8)
+        let sinceFlash = now.timeIntervalSince(flashAt)
+        let flash = reduceMotion || sinceFlash > 1.4 ? 0 : min(1, sinceFlash / 0.15) * max(0, 1 - sinceFlash / 1.4)
+        let glow = 0.72 + 0.28 * busyLevel + 0.3 * flash
+
+        let target = Self.palette(mood)
+        let mix = ease(since: moodChangedAt, now, duration: 0.8)
+        let c = previousMood.map { old in zip(Self.palette(old), target).map { $0.mix(with: $1, by: mix) } } ?? target
+
+        let s = { (k: Double, offset: Double) in Float(sin(phase * k + offset)) }
+        let clear = Self.base.opacity(0)
+        return MeshGradient(
+            width: 3, height: 3,
+            points: [
+                [0, 0], [0.5, 0], [1, 0],
+                [0, 0.5 + 0.06 * s(0.8, 0)], [0.5 + 0.14 * s(1.0, 1), 0.58 + 0.1 * s(1.3, 2)], [1, 0.5 + 0.06 * s(0.9, 3)],
+                [0, 1], [0.5 + 0.22 * s(0.7, 4), 1], [1, 1],
+            ],
+            colors: [
+                clear, clear, clear,
+                c[0].opacity(0.16 * glow), c[1].opacity(0.10 * glow), c[2].opacity(0.16 * glow),
+                c[0].opacity(0.5 * glow), c[1].opacity(0.58 * glow), c[2].opacity(0.5 * glow),
+            ],
+            smoothsColors: true
+        )
     }
 }
 

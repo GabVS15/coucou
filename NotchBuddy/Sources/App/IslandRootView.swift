@@ -287,6 +287,18 @@ struct BotPlacement: View {
                     .animation(.easeInOut(duration: 0.4), value: state.effectiveState)
             }
 
+            // Compact: a thin ring around Mochi once the plan is nearly used up
+            if state.mode == .compact, let pct = state.usage?.tightest?.window.usedPercentage,
+               pct >= UsageMonitor.compactRingThreshold {
+                Circle()
+                    .trim(from: 0, to: min(1, pct / 100))
+                    .stroke(UsageGauge.color(pct), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: diameter + 7, height: diameter + 7)
+                    .position(x: cx, y: cy)
+                    .transition(.opacity)
+            }
+
             // Uploading: no particle overhang (no hearts during upload), positioned directly at cy.
             // BotEngine cy = H/2 + 0 + oy*R + R*0.06 ≈ H/2 (body centered in canvas).
             // With .position(x:y:) placing the frame center at (uploadCx, cy), bot is at cy ✓.
@@ -484,8 +496,11 @@ struct IslandHeader: View {
 
             Spacer()
 
-            // Right: action icons
+            // Right: plan usage, then action icons
             HStack(spacing: 14) {
+                if let usage = state.usage {
+                    UsageGauge(usage: usage)
+                }
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         state.view = .settings
@@ -541,6 +556,65 @@ struct TabButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Plan usage gauge (header, right side)
+
+/// Ring + percentage of the tightest Claude Code window; hovering shows both windows and the reset time.
+struct UsageGauge: View {
+    let usage: UsageLimits
+    @State private var isHovered = false
+
+    static func color(_ pct: Double) -> Color {
+        if pct >= 90 { return Color(hex: "#F4505E") }
+        if pct >= 70 { return Color(hex: "#F5A524") }
+        return Color(hex: "#8E939C")
+    }
+
+    var body: some View {
+        if let tightest = usage.tightest {
+            let label = tightest.label
+            let pct = min(100, max(0, tightest.window.usedPercentage))
+            let stale = UsageMonitor.shared.lastSeen.map { Date().timeIntervalSince($0) > 15 * 60 } ?? true
+            let tint = stale ? Color(hex: "#5F646D") : Self.color(pct)
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.1), lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: pct / 100)
+                        .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 11, height: 11)
+                Text(isHovered ? detail(stale: stale) : "\(label) \(Int(pct.rounded()))%")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundColor(isHovered ? Color(hex: "#B0B5BE") : tint)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+            .animation(.easeOut(duration: 0.15), value: isHovered)
+        }
+    }
+
+    private func detail(stale: Bool) -> String {
+        var parts: [String] = []
+        if let w = usage.fiveHour { parts.append("5h \(Int(w.usedPercentage.rounded()))%") }
+        if let w = usage.sevenDay { parts.append("7d \(Int(w.usedPercentage.rounded()))%") }
+        if let w = usage.tightest?.window { parts.append("resets \(Self.resetText(w.resetsAt))") }
+        if stale, let seen = UsageMonitor.shared.lastSeen {
+            parts.append("seen \(seen.formatted(.relative(presentation: .named)))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "16:40" today, "Fri 09:00" later.
+    static func resetText(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 }
 

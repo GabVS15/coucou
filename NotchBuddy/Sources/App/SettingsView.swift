@@ -10,6 +10,10 @@ struct SettingsView: View {
     @State private var showDiff: Bool = false
     @State private var pendingHookJSON: String = ""
     @State private var hookNeedsUpdate: Bool = HookServer.hooksNeedUpdate()
+    #if !APPSTORE
+    @State private var statusLineInstalled: Bool = StatusLineRelay.isInstalled
+    @State private var statusLinePreview: (before: String, after: String)? = nil
+    #endif
     #if APPSTORE
     @State private var claudeAccessGranted: Bool = (UserDefaults.standard.data(forKey: "claudeDirectoryBookmark") != nil)
     #endif
@@ -132,6 +136,11 @@ struct SettingsView: View {
                                     .buttonStyle(.bordered)
                             }
                         }
+
+                        #if !APPSTORE
+                        Divider()
+                        usageGaugeSettings
+                        #endif
                     }
                     .padding(6)
                 }
@@ -457,6 +466,83 @@ struct SettingsView: View {
         do {
             try HookServer.shared.uninstallClaudeHooksAppStore(claudeURL: claudeURL)
             statusMessage = "✓ Hooks removed."
+        } catch {
+            statusMessage = "❌ \(error.localizedDescription)"
+        }
+    }
+    #endif
+
+    #if !APPSTORE
+    // MARK: Usage gauge (status line relay)
+
+    @ViewBuilder
+    private var usageGaugeSettings: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Usage gauge")
+                .font(.system(size: 12, weight: .semibold))
+            Text("Shows your 5-hour and weekly Claude plan usage in the notch (Pro and Max plans). Coucou reads it from Claude Code's status line: nb-hook goes in front of your current status line command and runs it unchanged. Without a status line of your own, Claude Code hides some footer hints once one is set.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                if statusLineInstalled {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.green)
+                    Button("Disconnect") { uninstallStatusLine() }
+                        .buttonStyle(.bordered)
+                } else {
+                    Button("Connect usage gauge") { statusLinePreview = StatusLineRelay.preview() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            if let preview = statusLinePreview {
+                HStack(alignment: .top, spacing: 8) {
+                    statusLineBlock("Before", preview.before)
+                    statusLineBlock("After", preview.after)
+                }
+                HStack {
+                    Button("Confirm & write") { installStatusLine() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Cancel") { statusLinePreview = nil }
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
+    private func statusLineBlock(_ title: String, _ json: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+            ScrollView {
+                Text(json)
+                    .font(.system(size: 10, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 90)
+            .padding(4)
+            .background(Color(NSColor.textBackgroundColor))
+            .cornerRadius(6)
+        }
+    }
+
+    private func installStatusLine() {
+        do {
+            try StatusLineRelay.install()
+            statusLinePreview = nil
+            statusLineInstalled = true
+            statusMessage = "✓ Usage gauge connected. It fills in at Claude Code's next reply."
+        } catch {
+            statusMessage = "❌ Write error: \(error.localizedDescription)"
+        }
+    }
+
+    private func uninstallStatusLine() {
+        do {
+            try StatusLineRelay.uninstall()
+            statusLineInstalled = StatusLineRelay.isInstalled
+            statusMessage = "✓ Status line restored."
         } catch {
             statusMessage = "❌ \(error.localizedDescription)"
         }

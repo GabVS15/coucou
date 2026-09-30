@@ -129,6 +129,12 @@ final class HookServer: @unchecked Sendable {
         if eventName == "PermissionRequest" {
             // Hold fd open — Claude Code waits for our decision (up to 120s)
             Task { @MainActor in self.processPermissionRequest(fd: fd, payload: payload) }
+        } else if eventName == "StatusLine" {
+            // Status line relay: plan usage only, no session involved
+            let limits = payload["rate_limits"] as? [String: Any] ?? [:]
+            Task { @MainActor in UsageMonitor.shared.ingest(rateLimits: limits) }
+            sendLine(fd: fd, text: #"{"ok":true}"#)
+            close(fd)
         } else if eventName == "Stop" {
             // Held only when Claude ends on a question and quick replies are on; otherwise answered at once
             Task { @MainActor in self.processStop(fd: fd, payload: payload) }
@@ -216,6 +222,10 @@ final class HookServer: @unchecked Sendable {
             if lower.contains("rate limit") || lower.contains("limite d") {
                 state.updateTask(id: id, state: .ratelimit)
                 SoundEngine.shared.play("rate")
+                UsageMonitor.shared.markLimitHit()
+                if let resetsAt = UsageMonitor.shared.limitResetsAt {
+                    appendStep(id: id, step: "Limit lifts at \(resetsAt.formatted(date: .omitted, time: .shortened))")
+                }
             } else if message.hasSuffix("?") {
                 state.updateTask(id: id, state: .question)
                 appendStep(id: id, step: message)
@@ -989,7 +999,32 @@ def main():
     except Exception:
         pass  # Always exit cleanly — never block Claude Code
 
-main()
+def statusline(encoded):
+    # Status line relay: forward the plan usage to Coucou, then run the user's own status line
+    # command with the same input so the terminal shows exactly what it showed before.
+    raw = sys.stdin.buffer.read()
+    try:
+        limits = json.loads(raw).get('rate_limits')
+        if limits:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.3)
+            s.connect(os.path.expanduser('~/Library/Application Support/NotchBuddy/nb.sock'))
+            s.sendall((json.dumps({'hook_event_name': 'StatusLine', 'rate_limits': limits}) + '\\n').encode())
+            s.close()
+    except Exception:
+        pass  # Coucou closed or slow: the status line must still show
+    if encoded:
+        try:
+            import base64, subprocess
+            command = base64.b64decode(encoded).decode()
+            sys.exit(subprocess.run(command, shell=True, input=raw).returncode)
+        except Exception:
+            pass
+
+if len(sys.argv) > 1 and sys.argv[1] == '--statusline':
+    statusline(sys.argv[2] if len(sys.argv) > 2 else '')
+else:
+    main()
 sys.exit(0)
 """
 

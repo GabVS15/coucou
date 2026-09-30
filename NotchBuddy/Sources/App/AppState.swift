@@ -227,6 +227,9 @@ final class AppState: ObservableObject {
     // Closing question waiting for a quick reply, per session task (Stop hook held open)
     @Published var quickReplies: [String: QuickReplyPrompt] = [:]
 
+    // Claude Code plan usage from the status line relay (nil: unknown, or every window has reset)
+    @Published var usage: UsageLimits? = nil
+
     // Permission requests waiting for a click, oldest first; the approval view shows the first one
     @Published var approvalQueue: [ApprovalInfo] = []
     var pendingApproval: ApprovalInfo? { approvalQueue.first }

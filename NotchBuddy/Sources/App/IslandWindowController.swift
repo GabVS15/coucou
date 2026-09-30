@@ -758,9 +758,13 @@ final class IslandWindowController: NSWindowController {
     }
 
     static func notchWidth(for screen: NSScreen) -> CGFloat {
-        let aux = (screen.auxiliaryTopLeftArea?.width ?? 0) +
-                  (screen.auxiliaryTopRightArea?.width ?? 0)
-        let w = screen.frame.width - aux
+        // No notch on this screen: the aux areas are nil, and frame.width alone
+        // would make the island as wide as the whole screen.
+        guard let left = screen.auxiliaryTopLeftArea,
+              let right = screen.auxiliaryTopRightArea else {
+            return IslandConst.notchWidth
+        }
+        let w = screen.frame.width - left.width - right.width
         return w > 0 ? w : IslandConst.notchWidth
     }
 

@@ -71,7 +71,7 @@ private struct LiveStepRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            icon.frame(width: 15, height: 15)
+            icon.frame(width: 16, height: 16)
             Text(kind.label)
                 .font(.system(size: 12.5, weight: status == .pending ? .regular : .semibold))
                 .foregroundColor(labelColor)
@@ -90,24 +90,79 @@ private struct LiveStepRow: View {
     @ViewBuilder private var icon: some View {
         switch status {
         case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13))
-                .foregroundColor(Self.green)
+            StepDoneBadge(color: Self.green)
         case .active:
             LiveSpinner()
         case .pending:
-            Image(systemName: pendingSymbol)
-                .font(.system(size: 12))
-                .foregroundColor(Self.dim)
+            StepGlyph(kind: kind)
+                .stroke(Self.dim, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
         }
     }
+}
 
-    private var pendingSymbol: String {
+// MARK: - Step icons
+//
+// Drawn in code in the prototype's icon style (16×16 grid, 1.4 outline, round caps),
+// like the header and ticker icons in design/prototype/notch-buddy.html.
+
+private struct StepGlyph: Shape {
+    let kind: LiveStepKind
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
         switch kind {
-        case .read: return "doc.text"
-        case .edit: return "pencil"
-        case .bash: return "apple.terminal"
-        case .done: return "checkmark.circle.fill"
+        case .read:   // sheet with text lines
+            p.addRoundedRect(in: CGRect(x: 3.5, y: 2, width: 9, height: 12), cornerSize: CGSize(width: 1.6, height: 1.6))
+            p.move(to: CGPoint(x: 6, y: 6));    p.addLine(to: CGPoint(x: 10, y: 6))
+            p.move(to: CGPoint(x: 6, y: 8.5));  p.addLine(to: CGPoint(x: 10, y: 8.5))
+            p.move(to: CGPoint(x: 6, y: 11));   p.addLine(to: CGPoint(x: 8.5, y: 11))
+        case .edit:   // pencil
+            p.move(to: CGPoint(x: 10.6, y: 2.6))
+            p.addLine(to: CGPoint(x: 13.4, y: 5.4))
+            p.addLine(to: CGPoint(x: 6, y: 12.8))
+            p.addLine(to: CGPoint(x: 2.6, y: 13.4))
+            p.addLine(to: CGPoint(x: 3.2, y: 10))
+            p.closeSubpath()
+            p.move(to: CGPoint(x: 9.2, y: 4)); p.addLine(to: CGPoint(x: 12, y: 6.8))
+        case .bash:   // terminal window with a >_ prompt (prototype ticker icons)
+            p.addRoundedRect(in: CGRect(x: 2, y: 3, width: 12, height: 10), cornerSize: CGSize(width: 2, height: 2))
+            p.move(to: CGPoint(x: 5, y: 6.3));  p.addLine(to: CGPoint(x: 7, y: 8)); p.addLine(to: CGPoint(x: 5, y: 9.7))
+            p.move(to: CGPoint(x: 8.5, y: 10)); p.addLine(to: CGPoint(x: 11, y: 10))
+        case .done:   // circle with a check
+            p.addEllipse(in: CGRect(x: 2.5, y: 2.5, width: 11, height: 11))
+            p.addPath(StepCheck().path(in: rect))
+        }
+        let k = min(rect.width, rect.height) / 16
+        return p.applying(CGAffineTransform(scaleX: k, y: k))
+    }
+}
+
+private struct StepCheck: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 5.6, y: 8.2))
+        p.addLine(to: CGPoint(x: 7.3, y: 9.9))
+        p.addLine(to: CGPoint(x: 10.5, y: 6.5))
+        return p
+    }
+}
+
+/// Finished step: filled green disc with a dark check, same 16×16 grid.
+private struct StepDoneBadge: View {
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let k = min(geo.size.width, geo.size.height) / 16
+            ZStack {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12 * k, height: 12 * k)
+                StepCheck()
+                    .stroke(Color(hex: "#0C0D10"), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .scaleEffect(k, anchor: .topLeading)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 }
@@ -119,8 +174,8 @@ private struct LiveSpinner: View {
     var body: some View {
         Circle()
             .trim(from: 0.15, to: 0.85)
-            .stroke(Color(hex: "#F5F6F8"), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            .frame(width: 12, height: 12)
+            .stroke(Color(hex: "#F5F6F8"), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            .frame(width: 11, height: 11)
             .rotationEffect(.degrees(spin ? 360 : 0))
             .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
             .onAppear { spin = true }

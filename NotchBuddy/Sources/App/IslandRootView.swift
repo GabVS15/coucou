@@ -26,7 +26,7 @@ struct IslandContainer: View {
     @State private var islandHeight: CGFloat = IslandConst.notchHeight
     @State private var cornerRadius: CGFloat = IslandConst.roundedCorner
     // topRadius > 0 → convex expanded corners; < 0 → concave ear cutouts
-    @State private var islandTopRadius: CGFloat = 0
+    @State private var islandTopRadius: CGFloat = IslandConst.compactTopCorner
     @State private var greetNotif: Bool = false
 
     private let openSpring = Animation.spring(response: 0.5, dampingFraction: 0.72)
@@ -117,7 +117,7 @@ struct IslandContainer: View {
                                     progress: state.uploadProgress,
                                     nw: state.notchWidth, nh: state.notchHeight)
             let cr  = newMode == .expanded ? IslandConst.expandedCorner : IslandConst.roundedCorner
-            let tr: CGFloat = 0
+            let tr: CGFloat = newMode == .expanded ? 0 : IslandConst.compactTopCorner
             withAnimation(anim) {
                 islandWidth      = w
                 islandHeight     = (newMode == .expanded && state.view == .prompt) ? chatPromptHeight : h
@@ -151,7 +151,7 @@ struct IslandContainer: View {
             islandWidth      = w
             islandHeight     = state.view == .prompt ? chatPromptHeight : h
             cornerRadius     = state.mode == .expanded ? IslandConst.expandedCorner : IslandConst.roundedCorner
-            islandTopRadius  = 0
+            islandTopRadius  = state.mode == .expanded ? 0 : IslandConst.compactTopCorner
         }
         .onReceive(NotificationCenter.default.publisher(for: .botGreet)) { _ in
             greetNotif.toggle()

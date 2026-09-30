@@ -85,6 +85,8 @@ enum IslandConst {
     static let earRadius: CGFloat   = 14
     static let roundedCorner: CGFloat = 14    // hidden/peek/compact
     static let expandedCorner: CGFloat = 22
+    static let compactExtraWidth: CGFloat = 100 // compact = notch width + this
+    static let compactTopCorner: CGFloat = 10   // top corners in hidden/compact
 
     static let viewLayouts: [IslandView: ViewLayout] = [
         // Home is the reference: height 150

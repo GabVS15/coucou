@@ -203,6 +203,14 @@ final class AppState: ObservableObject {
     @Published var chatHistory: [ChatMessage] = []
 
     // Pending approval request from Claude Code hook
+    // Quick replies to Claude's closing question — persisted. Off → the Stop hook never waits.
+    @Published var quickRepliesEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(quickRepliesEnabled, forKey: "quickRepliesEnabled") }
+    }
+
+    // Closing question waiting for a quick reply, per session task (Stop hook held open)
+    @Published var quickReplies: [String: QuickReplyPrompt] = [:]
+
     // Permission requests waiting for a click, oldest first; the approval view shows the first one
     @Published var approvalQueue: [ApprovalInfo] = []
     var pendingApproval: ApprovalInfo? { approvalQueue.first }
@@ -220,6 +228,7 @@ final class AppState: ObservableObject {
         }
         if let v = ud.object(forKey: "collapseOnOutsideClick") as? Bool { collapseOnOutsideClick = v }
         if let v = ud.object(forKey: "liveSessionEnabled") as? Bool { liveSessionEnabled = v }
+        if let v = ud.object(forKey: "quickRepliesEnabled") as? Bool { quickRepliesEnabled = v }
         if let v = ud.object(forKey: "absenceInterval")   as? Double { absenceInterval   = v }
         if let v = ud.object(forKey: "greetThreshold")    as? Double { greetThresholdSeconds = v }
         if let v = ud.object(forKey: "hotkeyEnabled") as? Bool  { hotkeyEnabled = v }

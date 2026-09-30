@@ -327,23 +327,25 @@ struct FinishedView: View {
             CardBackground(wash: .green)
             VStack(alignment: .leading, spacing: 5) {
                 AgentWho(task: state.focusTask, label: "Claude Code finished")
-                Text(state.focusTask?.steps.last ?? "Session finished")
-                    .font(.system(size: 15, weight: .semibold))
-                HStack(spacing: 8) {
-                    #if !APPSTORE
-                    PrimaryButton("Open terminal") {
-                        let terminalBundleIds = ["com.apple.Terminal", "com.googlecode.iterm2", "net.kovidgoyal.kitty", "com.mitchellh.ghostty"]
-                        let activated = terminalBundleIds.compactMap { id in
-                            NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == id }
-                        }.first.map { $0.activate(options: .activateIgnoringOtherApps) }
-                        if activated == nil {
-                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
+                if let prompt = state.quickReplies[state.focusId ?? ""] {
+                    // Claude ended on a question: answer it from here
+                    Text(prompt.question)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(2)
+                    QuickReplyBar(prompt: prompt, showQuestion: false)
+                } else {
+                    Text(state.focusTask?.steps.last ?? "Session finished")
+                        .font(.system(size: 15, weight: .semibold))
+                    HStack(spacing: 8) {
+                        if let task = state.focusTask, task.isClaudeSession {
+                            PrimaryButton("Open \(task.claudeSource?.appName ?? "VS Code")") {
+                                (task.claudeSource ?? .vscode).open(cwd: task.sessionCwd)
+                                NotificationCenter.default.post(name: .islandCollapse, object: nil)
+                            }
                         }
-                        NotificationCenter.default.post(name: .islandCollapse, object: nil)
-                    }
-                    #endif
-                    SecondaryButton("OK") {
-                        NotificationCenter.default.post(name: .islandCollapse, object: nil)
+                        SecondaryButton("OK") {
+                            NotificationCenter.default.post(name: .islandCollapse, object: nil)
+                        }
                     }
                 }
             }

@@ -17,6 +17,9 @@ final class IslandStateMachine {
     /// Fired on every transition: (from, to)
     var onTransition: ((State, State) -> Void)?
 
+    /// True while something on screen needs the user (approval, quick reply): the island stays open.
+    var holdOpen: () -> Bool = { false }
+
     /// home → petit delay (seconds). Override for debug.
     var homeToPetitDelay: TimeInterval = 15
     /// petit → hidden delay (seconds). Override for debug.
@@ -80,6 +83,13 @@ final class IslandStateMachine {
         transition(to: .petit)
     }
 
+    /// An alert (hook) opened the island itself: follow it as `home` without re-expanding,
+    /// so hovering or leaving it no longer collapses it right away.
+    func alertOpened() {
+        cancelTimers()
+        state = .home
+    }
+
     /// Compact island clicked
     func click() {
         guard state == .petit else { return }
@@ -131,6 +141,8 @@ final class IslandStateMachine {
         homeCollapseWork?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self, self.state == .home else { return }
+            // Still waiting for the user: check again later instead of closing under them
+            if self.holdOpen() { self.scheduleHomeCollapse(); return }
             self.transition(to: .petit)
         }
         homeCollapseWork = item

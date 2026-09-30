@@ -27,6 +27,9 @@ final class HookServer: @unchecked Sendable {
 
     private var serverFD: Int32 = -1
     private var approvalFDs: [UUID: Int32] = [:]    // one open socket per queued permission request
+    private var quickReplyFDs: [UUID: Int32] = [:]  // Stop hooks held open while a question is shown
+    private var quickReplyWatchers: [UUID: DispatchSourceRead] = [:]  // notice when a held hook goes away
+    private var quickReplyChain: [String: Int] = [:] // quick replies in a row, per session task
     private var lastEventAt: [String: Date] = [:]   // per session task, for the idle cleanup
     private var pruneTimer: Timer?
 
@@ -126,6 +129,9 @@ final class HookServer: @unchecked Sendable {
         if eventName == "PermissionRequest" {
             // Hold fd open — Claude Code waits for our decision (up to 120s)
             Task { @MainActor in self.processPermissionRequest(fd: fd, payload: payload) }
+        } else if eventName == "Stop" {
+            // Held only when Claude ends on a question and quick replies are on; otherwise answered at once
+            Task { @MainActor in self.processStop(fd: fd, payload: payload) }
         } else {
             Task { @MainActor in self.processEvent(name: eventName, payload: payload) }
             sendLine(fd: fd, text: #"{"ok":true}"#)
@@ -161,6 +167,13 @@ final class HookServer: @unchecked Sendable {
         let id = state.upsertClaudeSession(sessionId: sessionId, projectName: projectName, cwd: cwd, source: source)
         lastEventAt[id] = Date()
         let focused = state.focusId == id
+
+        // The session moved on (answered in its own app, or Claude acts again): its question is gone.
+        // Other events (Notification right after Stop, subagents…) leave it on screen.
+        if ["UserPromptSubmit", "PreToolUse"].contains(name), state.quickReplies[id] != nil {
+            resolveQuickReply(taskId: id, reply: nil, reason: name)
+        }
+        if name == "UserPromptSubmit" { quickReplyChain[id] = 0 }
 
         // Live session view: diff and terminal output stay in memory, never logged
         if state.liveSessionEnabled {
@@ -255,6 +268,8 @@ final class HookServer: @unchecked Sendable {
         for request in state.approvalQueue where request.taskId == taskId {
             resolveApproval(request.id, decision: "ask")
         }
+        resolveQuickReply(taskId: taskId, reply: nil, reason: "SessionEnd")
+        quickReplyChain[taskId] = nil
         lastEventAt[taskId] = nil
         state.removeClaudeSession(taskId: taskId)
     }
@@ -285,6 +300,133 @@ final class HookServer: @unchecked Sendable {
             NotificationCenter.default.post(name: .hookReveal, object: nil)
         }
         // Already compact and non-alert: Mochi state update is enough, no expand
+    }
+
+    // MARK: - Quick replies (Stop hook held while Claude's closing question is shown)
+
+    @MainActor
+    private func processStop(fd: Int32, payload: [String: Any]) {
+        processEvent(name: "Stop", payload: payload)
+
+        let state = AppState.shared
+        let taskId = AppState.claudeTaskId(payload["session_id"] as? String ?? "unknown")
+        // stop_hook_active = Claude is already continuing because of a Stop hook (e.g. our last reply)
+        if payload["stop_hook_active"] as? Bool != true { quickReplyChain[taskId] = 0 }
+
+        guard state.quickRepliesEnabled,
+              state.tasks.contains(where: { $0.id == taskId }),
+              state.quickReplies[taskId] == nil,
+              (quickReplyChain[taskId] ?? 0) < QuickReplySuggester.maxChained,
+              let message = payload["last_assistant_message"] as? String,
+              let suggestion = QuickReplySuggester.suggest(message) else {
+            Task.detached { [weak self] in
+                self?.sendLine(fd: fd, text: #"{"ok":true}"#)
+                close(fd)
+            }
+            return
+        }
+
+        let prompt = QuickReplyPrompt(taskId: taskId,
+                                      question: LiveSessionParser.clean(suggestion.question),
+                                      options: suggestion.options.map { LiveSessionParser.clean($0) },
+                                      deadline: Date().addingTimeInterval(QuickReplySuggester.waitSeconds))
+        quickReplyFDs[prompt.id] = fd
+        watchHookClosed(fd: fd, promptId: prompt.id, taskId: taskId)
+        state.quickReplies[taskId] = prompt
+        if state.focusId == taskId {
+            state.isPinned = true   // stays open (no auto-close, no outside-click close) until answered or expired
+        } else {
+            setPillBadge(id: taskId, badge: .approval)
+        }
+        nbLog("Quick reply offered (\(taskId.dropFirst(AgentTask.claudeSessionPrefix.count).prefix(8)))")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + QuickReplySuggester.waitSeconds) { [weak self] in
+            guard let self, state.quickReplies[taskId]?.id == prompt.id else { return }
+            self.resolveQuickReply(taskId: taskId, reply: nil, reason: "expired")   // no click: Claude stops normally
+        }
+    }
+
+    /// The held Stop hook can end without us: Claude Code's hook timeout (sessions started before the
+    /// hooks were updated keep the old 10 s), or the user interrupting. Then the question can no longer
+    /// be answered, so it leaves the notch at once.
+    @MainActor
+    private func watchHookClosed(fd: Int32, promptId: UUID, taskId: String) {
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .global(qos: .utility))
+        source.setEventHandler { [weak self, weak source] in
+            var byte: UInt8 = 0
+            let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+            guard n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK), let source else { return }
+            // Peer closed: stop watching, then (once cancelled, so the fd can be closed) drop the question
+            source.setCancelHandler { [weak self] in
+                Task { @MainActor in self?.hookClosed(fd: fd, promptId: promptId, taskId: taskId) }
+            }
+            source.cancel()
+        }
+        quickReplyWatchers[promptId] = source
+        source.resume()
+    }
+
+    @MainActor
+    private func hookClosed(fd: Int32, promptId: UUID, taskId: String) {
+        if AppState.shared.quickReplies[taskId]?.id == promptId {
+            quickReplyWatchers[promptId] = nil
+            resolveQuickReply(taskId: taskId, reply: nil, reason: "hook ended (Claude Code timeout or interrupt)")
+        } else {
+            close(fd)   // answered at the same moment: the fd was left for us to close
+        }
+    }
+
+    /// Called by the quick reply buttons / field. Only an explicit click or Return sends text.
+    @MainActor
+    func sendQuickReply(taskId: String, text: String) {
+        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return }
+        resolveQuickReply(taskId: taskId, reply: reply, reason: "sent")
+    }
+
+    /// Releases the held Stop hook: with a reply Claude continues with it, without one it stops.
+    @MainActor
+    private func resolveQuickReply(taskId: String, reply: String?, reason: String) {
+        let state = AppState.shared
+        guard let prompt = state.quickReplies.removeValue(forKey: taskId) else { return }
+        if reply == nil { nbLog("Quick reply closed: \(reason)") }
+        // Unpin unless something else still waits on screen (an approval, or the focused session's question)
+        if state.approvalQueue.isEmpty && state.quickReplies[state.focusId ?? ""] == nil { state.isPinned = false }
+
+        var json = #"{"ok":true}"#
+        if let reply,
+           let data = try? JSONSerialization.data(withJSONObject: ["reply": reply]),
+           let line = String(data: data, encoding: .utf8) {
+            json = line
+        }
+        if let fd = quickReplyFDs.removeValue(forKey: prompt.id) {
+            let line = json
+            let answer: @Sendable () -> Void = { [weak self] in
+                self?.sendLine(fd: fd, text: line)
+                close(fd)
+            }
+            let watcher = quickReplyWatchers.removeValue(forKey: prompt.id)
+            if let watcher, !watcher.isCancelled {
+                // The fd may only be closed once its read source is cancelled
+                watcher.setCancelHandler(handler: answer)
+                watcher.cancel()
+            } else if watcher == nil {
+                Task.detached(operation: answer)
+            }
+            // else: the hook just went away; hookClosed() closes the fd
+        }
+
+        guard reply != nil else {
+            if state.tasks.first(where: { $0.id == taskId })?.pillBadge == .approval { clearPillBadge(id: taskId) }
+            return
+        }
+        quickReplyChain[taskId, default: 0] += 1
+        nbLog("Quick reply sent (\(taskId.dropFirst(AgentTask.claudeSessionPrefix.count).prefix(8)))")   // never the text
+        state.updateTask(id: taskId, state: .thinking)
+        clearPillBadge(id: taskId)
+        if state.focusId == taskId && state.view == .finished {
+            state.view = state.liveSessionEnabled ? .liveSession : .overview
+        }
     }
 
     // MARK: - Permission requests (blocking — Claude Code waits for the decision)
@@ -486,12 +628,15 @@ final class HookServer: @unchecked Sendable {
     }
 
     private func sendLine(fd: Int32, text: String) {
-        var bytes = Array((text + "\n").utf8)
-        var sent = 0
-        while sent < bytes.count {
-            let n = Darwin.send(fd, &bytes[sent], bytes.count - sent, 0)
-            if n <= 0 { break }
-            sent += n
+        let bytes = Array((text + "\n").utf8)
+        bytes.withUnsafeBytes { buffer in
+            // `&bytes[sent]` would point at a one-byte temporary copy, not into the array
+            var sent = 0
+            while sent < buffer.count {
+                let n = Darwin.send(fd, buffer.baseAddress! + sent, buffer.count - sent, 0)
+                if n <= 0 { break }
+                sent += n
+            }
         }
     }
 
@@ -515,23 +660,24 @@ final class HookServer: @unchecked Sendable {
 
     // MARK: - Outdated hook detection
 
-    /// Returns true if settings.json has a Coucou PermissionRequest hook with timeout < 120s.
+    /// Returns true if settings.json has a Coucou hook installed with a timeout shorter than the app needs:
+    /// PermissionRequest waits up to 120 s for a click, Stop up to 45 s for a quick reply.
     static func hooksNeedUpdate() -> Bool {
         let settingsURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/settings.json")
         guard let data = try? Data(contentsOf: settingsURL),
               let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = settings["hooks"] as? [String: Any],
-              let permReqHooks = hooks["PermissionRequest"] as? [[String: Any]] else {
+              let hooks = settings["hooks"] as? [String: Any] else {
             return false
         }
-        for matcher in permReqHooks {
-            if let hookList = matcher["hooks"] as? [[String: Any]] {
-                for hook in hookList {
+        let required: [String: Int] = ["PermissionRequest": 120, "Stop": 60]
+        for (event, minimum) in required {
+            for matcher in hooks[event] as? [[String: Any]] ?? [] {
+                for hook in matcher["hooks"] as? [[String: Any]] ?? [] {
                     if let cmd = hook["command"] as? String,
-                       (cmd.contains("NotchBuddy") || cmd.contains("coucou")),
+                       cmd.contains("NotchBuddy") || cmd.contains("coucou"),
                        let timeout = hook["timeout"] as? Int,
-                       timeout < 120 {
+                       timeout < minimum {
                         return true
                     }
                 }
@@ -590,7 +736,7 @@ final class HookServer: @unchecked Sendable {
             ("PreToolUse", 10), ("PostToolUse", 10), ("PostToolUseFailure", 10),
             ("PermissionRequest", 120),
             ("Notification", 10),
-            ("Stop", 10), ("StopFailure", 10),
+            ("Stop", 60), ("StopFailure", 10),   // Stop may wait up to 45 s for a quick reply
             ("SubagentStart", 10), ("SubagentStop", 10),
         ]
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
@@ -701,7 +847,7 @@ final class HookServer: @unchecked Sendable {
             ("PreToolUse", 10), ("PostToolUse", 10), ("PostToolUseFailure", 10),
             ("PermissionRequest", 120),
             ("Notification", 10),
-            ("Stop", 10), ("StopFailure", 10),
+            ("Stop", 60), ("StopFailure", 10),   // Stop may wait up to 45 s for a quick reply
             ("SubagentStart", 10), ("SubagentStop", 10),
         ]
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
@@ -805,6 +951,33 @@ def main():
         # Claude Code will handle the absence of output (re-ask or default behaviour)
         sys.exit(0)
 
+    if event == 'Stop':
+        # Quick replies: Coucou answers at once unless Claude ended on a question shown in the notch;
+        # then it waits for a click (max ~45 s). A reply keeps Claude going; anything else lets it stop.
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(50)
+            s.connect(socket_path)
+            s.sendall((json.dumps(payload) + '\\n').encode())
+            chunks = []
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if b'\\n' in chunk:
+                    break
+            s.close()
+            resp = json.loads(b''.join(chunks).decode().strip() or '{}')
+            reply = resp.get('reply')
+            if isinstance(reply, str) and reply.strip():
+                out = {'decision': 'block', 'reason': 'The user replied from the Coucou notch: ' + reply}
+                sys.stdout.write(json.dumps(out) + '\\n')
+                sys.stdout.flush()
+        except Exception:
+            pass  # Coucou unreachable or no reply: stop normally
+        sys.exit(0)
+
     # All other events: fire-and-forget (0.3s timeout, never blocks)
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -894,6 +1067,33 @@ def main():
         except Exception:
             pass
         # App unreachable, timed out, or no explicit decision — print nothing
+        sys.exit(0)
+
+    if event == 'Stop':
+        # Quick replies: Coucou answers at once unless Claude ended on a question shown in the notch;
+        # then it waits for a click (max ~45 s). A reply keeps Claude going; anything else lets it stop.
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(50)
+            s.connect(socket_path)
+            s.sendall((json.dumps(payload) + '\\n').encode())
+            chunks = []
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if b'\\n' in chunk:
+                    break
+            s.close()
+            resp = json.loads(b''.join(chunks).decode().strip() or '{}')
+            reply = resp.get('reply')
+            if isinstance(reply, str) and reply.strip():
+                out = {'decision': 'block', 'reason': 'The user replied from the Coucou notch: ' + reply}
+                sys.stdout.write(json.dumps(out) + '\\n')
+                sys.stdout.flush()
+        except Exception:
+            pass  # Coucou unreachable or no reply: stop normally
         sys.exit(0)
 
     try:

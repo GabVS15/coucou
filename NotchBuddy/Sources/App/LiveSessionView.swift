@@ -16,7 +16,8 @@ struct LiveSessionView: View {
                 HStack(alignment: .top, spacing: 0) {
                     LiveStepsColumn(state: state)
                         .frame(width: 128)
-                    LiveCodePanel(session: state.focusedLiveSession)
+                    LiveCodePanel(session: state.focusedLiveSession,
+                                  quickReply: state.quickReplies[state.focusId ?? ""])
                         .padding(.vertical, 8)
                         .padding(.trailing, 8)
                 }
@@ -186,8 +187,10 @@ private struct LiveSpinner: View {
 
 private struct LiveCodePanel: View {
     let session: LiveSession
+    let quickReply: QuickReplyPrompt?
 
     private static let bottomHeight: CGFloat = 84
+    private static let bottomHeightWithReplies: CGFloat = 128
 
     var body: some View {
         let (top, bottom) = session.panels
@@ -206,7 +209,7 @@ private struct LiveCodePanel: View {
             if let bottom {
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 content(bottom)
-                    .frame(height: Self.bottomHeight)
+                    .frame(height: bottom == .answer && quickReply != nil ? Self.bottomHeightWithReplies : Self.bottomHeight)
                     .id(bottom)
                     .transition(.opacity)
             }
@@ -231,7 +234,18 @@ private struct LiveCodePanel: View {
         case .terminal:
             if let terminal = session.terminal { LiveTerminalView(terminal: terminal) }
         case .answer:
-            if let answer = session.answer { LiveAnswerView(lines: answer) }
+            if let answer = session.answer {
+                VStack(spacing: 0) {
+                    LiveAnswerView(lines: answer)
+                    if let quickReply {
+                        QuickReplyBar(prompt: quickReply)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 6)
+                            .padding(.bottom, 8)
+                            .background(Color.white.opacity(0.03))
+                    }
+                }
+            }
         case .summary:
             LiveSummaryView(session: session)
         }

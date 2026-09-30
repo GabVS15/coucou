@@ -149,6 +149,9 @@ final class IslandWindowController: NSWindowController {
     // MARK: - FSM wiring
 
     private func wireFSM() {
+        // Approvals and quick replies pin the island until answered
+        fsm.holdOpen = { [weak self] in self?.state.isPinned ?? false }
+
         fsm.onTransition = { [weak self] from, to in
             guard let self else { return }
             switch to {
@@ -369,13 +372,23 @@ final class IslandWindowController: NSWindowController {
         // Hook server expand requests (alerts only)
         NotificationCenter.default.addObserver(forName: .hookExpand, object: nil, queue: .main) { [weak self] note in
             guard let self, let view = note.object as? IslandView else { return }
-            self.expand(to: view)
+            MainActor.assumeIsolated {
+                // Keep the state machine in step, otherwise the first hover/leave closes the alert
+                self.fsm.alertOpened()
+                self.expand(to: view)
+                if !self.wasInIsland { self.fsm.mouseLeft() }
+            }
         }
 
         // Hook server compact reveal (non-alert work events: session start, tool use, etc.)
         NotificationCenter.default.addObserver(forName: .hookReveal, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.fsm.reveal()
+        }
+
+        // Keyboard focus for a text field in the island (quick reply field)
+        NotificationCenter.default.addObserver(forName: .islandWantsKey, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.islandPanel.makeKey() }
         }
 
         // Collapse requests from views (OK button, etc.)

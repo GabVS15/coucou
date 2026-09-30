@@ -287,18 +287,6 @@ struct BotPlacement: View {
                     .animation(.easeInOut(duration: 0.4), value: state.effectiveState)
             }
 
-            // Compact: a thin ring around Mochi once the plan is nearly used up
-            if state.mode == .compact, let pct = state.usage?.tightest?.window.usedPercentage,
-               pct >= UsageMonitor.compactRingThreshold {
-                Circle()
-                    .trim(from: 0, to: min(1, pct / 100))
-                    .stroke(UsageGauge.color(pct), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: diameter + 7, height: diameter + 7)
-                    .position(x: cx, y: cy)
-                    .transition(.opacity)
-            }
-
             // Uploading: no particle overhang (no hearts during upload), positioned directly at cy.
             // BotEngine cy = H/2 + 0 + oy*R + R*0.06 ≈ H/2 (body centered in canvas).
             // With .position(x:y:) placing the frame center at (uploadCx, cy), bot is at cy ✓.

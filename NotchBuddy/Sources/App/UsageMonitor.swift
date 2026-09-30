@@ -34,8 +34,6 @@ struct UsageLimits: Codable, Equatable {
 final class UsageMonitor {
     static let shared = UsageMonitor()
 
-    /// From this level on, the compact island draws a ring around Mochi.
-    static let compactRingThreshold: Double = 80
     /// A window reset only gets a notch message if it was nearly used up (or Claude Code hit the limit).
     private static let resetNoticeThreshold: Double = 90
 
